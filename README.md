@@ -1,297 +1,155 @@
-# ⚡ HERMUS Agent Free
+# Hermus
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-light.png">
-    <img alt="HERMUS Logo" src="https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/docs/assets/hermus-dark.png" width="200">
-  </picture>
-</p>
-
-<p align="center">
-<strong>🌟 A free, open-source, self-hosted AI agent for coding, research, automation and multi-agent work.</strong><br>
-<strong>Build with local models or free-tier providers. Keep your data, tools and runtime under your control.</strong>
-</p>
+<img src="docs/assets/hermus-room.png" alt="The room: one character, one input line, and a single Systems control in the corner" width="820">
 
 <p align="center">
 <a href="https://github.com/trmv2007-bot/hermus-agent-free/actions/workflows/test.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/trmv2007-bot/hermus-agent-free/test.yml?branch=main&label=CI"></a>
 </p>
 
----
+A free companion that runs on your own computer. It answers, remembers, can work
+your desktop when you allow it, and never changes anything without a way back.
 
-## 🚀 Quick Start
+It is not a chatbot with a dashboard attached. You open it and there is one
+character and one input line; the machinery behind it is reachable, but it is not
+the product.
 
-### One-shot full install
+## Install
 
-HERMUS ships one canonical installer path per platform. The installer obtains the repository, creates the project-local Python environment, installs the required runtime dependencies, installs supported optional integrations, installs the browser runtime used by the web subsystem where supported, initializes the runtime layout, and runs the Doctor/live verification.
+**Windows 10/11** — PowerShell:
 
-It is safe to re-run. It does not delete HERMUS memory, projects, workspace data, logs, credentials or model files.
+```powershell
+$p = Join-Path $env:TEMP "hermus-install.ps1"
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.ps1" -OutFile $p
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
+```
 
-**It answers before it asks you anything.** A fresh install resolves a model down a ladder and says which rung answered:
+**Linux, macOS, WSL or Termux**:
 
-1. a model on your machine — no key, no rate limit, and nothing you type leaves the computer;
-2. a **keyless** hosted free tier (Pollinations, then OVHcloud AI Endpoints) — no account, no key, no sign-up. The room says so plainly the first time a turn goes there, because "your words left this machine" is not something to leave implicit;
-3. a free-tier key, if you have pasted one (Groq, Mistral, OpenRouter, Gemini — all free, no card);
-4. the offline stub, named as the stub with the one command that fixes it.
+```bash
+curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh | bash
+```
 
-**It will still offer you a local brain.** At the end of the install one question asks whether to install Ollama and download `llama3.2:1b` (about 0.6 GB, once, on your machine, no account). Say yes and the first answer comes from a model on your computer, with no rate limit and no network. Say no and the keyless tier answers while the install tells you, in one line, that Ollama or a free key is what makes it faster. Nothing is downloaded without that answer.
+It installs into its own folder, never touches your documents, and running it
+twice is safe. A few minutes.
 
-#### Windows 10/11
+## First run: it answers before it asks you anything
 
-Run this from PowerShell:
+A fresh install resolves a model down a ladder and says which rung answered:
 
-    $p = Join-Path $env:TEMP "hermus-install.ps1"
-    Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.ps1" -OutFile $p
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
+1. a model on your machine — no key, no rate limit, nothing you type leaves the computer;
+2. a **keyless** hosted free tier (Pollinations, then OVHcloud AI Endpoints) — no account, no key, no sign-up. The room says so the first time a turn goes there, because "your words left this machine" is not something to leave implicit;
+3. a free-tier key, if you pasted one (Groq, Mistral, OpenRouter, Gemini — all free, no card);
+4. the offline stub, named as the stub, with the one command that fixes it.
 
-The Windows bootstrap uses winget when available to install missing Git, Python and Node.js LTS. The Node runtime is only required when a JavaScript package manifest is present.
+The installer still offers to install a local model, because local is faster and
+private: one question, about 0.6 GB, no account. Say yes and the first answer
+comes from your own computer. Say no and the keyless tier answers while the
+install tells you, in one line, what makes it faster. Nothing is downloaded
+without that answer.
 
-#### Linux / WSL
+Setup itself is three choices, each already selected — what should answer you,
+what it may do, what it is called — then it types a real question to the model you
+chose and streams the answer back as proof. If nothing can answer, it says so once
+and gives you the command that fixes it.
 
-Run:
+## Use it
 
-    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
-    bash /tmp/hermus-install.sh
+Three commands. That is the whole command line for a person.
 
-The Linux installer supports the package-manager families already handled by setup.sh (apt, dnf, yum, pacman and apk).
+```bash
+hermus              # install it if needed, start it, and open the room
+hermus undo         # undo the last thing it changed
+hermus understand   # what it can and cannot do on this machine
+```
 
-#### macOS
+From a clone, `./hermus` is the same thing and does the install itself when the
+runtime is missing.
 
-Run:
+> $ ./hermus
+> Setting Hermus up. This takes a few minutes, and running it again is safe.
+> ...
+> Hermus is running at http://127.0.0.1:8000/
 
-    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
-    bash /tmp/hermus-install.sh
+In the room:
 
-macOS uses the canonical setup.sh flow and Homebrew when required host tooling is missing.
+- **Type.** One input line, one answer, streaming as it arrives. Stop is the same
+  button while a turn runs.
+- **Watch the plan.** A turn with steps shows them above the conversation, and a
+  step only advances when a tool result backs it.
+- **Approve in place.** An action that needs your yes arrives as one card inside
+  the conversation, never as a modal that steals your caret.
+- **Systems** is the one quiet control in the corner. It answers four questions —
+  model, voice, computer, memory — in four sentences, and names the single command
+  that fixes anything missing. Nothing in it is needed to use the room.
+- **Ctrl P** goes anywhere else: the plan, the journal, what it remembers.
 
-#### Android / Termux
+Everything the operator console can do is behind the room's Systems sheet, under
+Diagnostics, and it opens only when you ask for it.
 
-Run:
+## What it will not do
 
-    curl -fsSL https://raw.githubusercontent.com/trmv2007-bot/hermus-agent-free/main/install.sh -o /tmp/hermus-install.sh
-    bash /tmp/hermus-install.sh
-
-Termux uses pkg for required host packages. Desktop Chromium/Playwright support is intentionally not forced on Termux.
-
-### Already cloned the repository?
-
-Windows:
-
-    .\setup.cmd
-
-Linux / macOS / Termux:
-
-    ./setup.sh
-
-### Verify or repair
-
-Windows:
-
-    .\setup.cmd -VerifyOnly
-    .\setup.cmd -Repair
-
-Linux / macOS / Termux:
-
-    ./setup.sh --verify-only
-    ./setup.sh --repair
-
-### Start HERMUS
-
-    ./hermus gateway start
-
-Open **http://localhost:8000/** — the first screen asks three questions (what answers you, what it may do, its name), then proves the model works by answering you once, streaming.
-When setup is done, `/` opens the companion: one character and one input line. The eleven operator panels of the Control Room live at **http://localhost:8000/control**, one quiet control away.
-## 🧠 What is HERMUS?
-
-**HERMUS** is a general-purpose personal AI agent: a persistent system that can understand objectives, plan work, delegate to specialist capabilities, operate tools, verify results, recover from failures, remember what it learns, and safely become more useful over time.
-
-The architecture is inspired by the idea of a persistent personal assistant—a **Jarvis/Fairy-style operating layer** rather than a simple chatbot.
-
-> **Autonomy should mean more useful execution, not fewer safety controls.**
-
----
+- **Nothing changes without a way back.** Every mutating action is previewed,
+  journaled and undoable with `hermus undo`.
+- **No paid service is required or default.** Local models first, free tiers
+  second. There is no paid tier in this build.
+- **Nothing interrupts you.** No modal, no focus steal, no notification while you
+  are typing, in a call, or fullscreen; proactive surfaces batch into a digest.
+- **No claim the code does not back.** If a surface is a stub, it says so or it is
+  not there. The table below names the test behind every row.
 
 ## Build status
 
 Every row names the test that backs it. If a claim has no test, it is not here.
 The same suite runs with `make test` on Linux and macOS and with
 `py -3 -m pytest tests -q --ignore=tests/eval` on Windows, and on every pull
-request. The suite is platform-neutral by construction: browser code is proven by
-running the real frontend files in Node from a temporary file, never through a
-command line that Windows would refuse to build.
+request. It is platform-neutral by construction: browser code is proven by running
+the real frontend files in Node, never through a command line Windows would refuse
+to build.
 
-| Capability | Evidence |
+| What you get | The test that backs it |
 |---|---|
-| Verified computer-control execution | `tests/test_computer_agent_v2.py` |
-| Voice presence + executive integration | `tests/test_voice_executive_bridge.py` |
-| Control Room / system observability | `tests/test_control_room_e2e.py` |
-| Learning, memory + reusable skills | `tests/test_learning_loop.py` |
-| End-to-end autonomy + safety hardening | `tests/test_autonomy_safety_contract.py` |
-| Runtime reliability + observability | `tests/test_runtime_health.py` |
-| Proactive event-driven automation | `tests/test_proactive.py` |
-| Scheduling + time awareness | `tests/test_phase8_scheduler.py` |
-| Persistent personal context | `tests/test_phase9_personal_context.py` |
-| Live world awareness | `tests/test_world_awareness.py` |
-| Long-horizon autonomous loop | `tests/test_autonomous_loop.py` |
-| Specialist agent delegation | `tests/test_agent_delegation.py` |
-| Multimodal intelligence | `tests/test_phase13_multimodal.py` |
-| Natural conversation + interruption | `tests/test_phase14_conversation.py` |
-| Personal operating system | `tests/test_phase15_personal_os.py` |
-| Self-improving agent | `tests/test_phase16_self_improvement.py` |
-| Distributed HERMUS | `tests/test_phase17_distributed.py` |
-| Reliability & recovery | `tests/test_phase18_reliability.py` |
-| Fresh-machine installation | `tests/test_bootstrap_runtime.py` |
-| First run: model resolution, `/welcome`, no fake boot claims | `tests/test_first_run_onboarding.py` |
-| Real-world provider/device deployment | deployment-dependent; `tests/test_model_gateway_fallback.py` covers the fallback path only |
+| A first run that resolves a model, proves it answers, and refuses a profile it cannot honour | `tests/test_first_run_onboarding.py` |
+| One input line, one character, one Systems control, and Stop mid-turn, at 1440 and 420 | `tests/browser/test_room.py` |
+| Nothing on first open looks like a status board | `tests/browser/test_surfaces.py` |
+| A typed question gets its answer, fast, with no pollers left open | `tests/browser/test_first_answer.py` |
+| The plan is visible, and each step has its receipt | `tests/browser/test_room_thinking.py` |
+| Voice: hold to talk, hear the answer, stop on a word | `tests/test_voice_executive_bridge.py` |
+| Every mutation previewed, journaled and undoable | `tests/test_undo_guarantee.py` |
+| The undo journal answers over the gateway | `tests/test_undo_routes.py` |
+| `hermus understand` answers from a real capability probe | `tests/test_self_model.py` |
+| Memory and skills that carry across sessions | `tests/test_learning_loop.py` |
+| Quiet proactivity and schedules that stay inside quiet hours | `tests/test_proactive.py`, `tests/test_phase8_scheduler.py` |
+| A read-only picture of the desktop | `tests/test_world_awareness.py` |
+| Reading and working the desktop under your permission | `tests/test_computer_agent_v2.py` |
+| Installing on a fresh machine | `tests/test_bootstrap_runtime.py` |
 
----
-
-## 🛡️ Reliability & Recovery
-
-HERMUS includes retries, circuit breakers, durable idempotency, crash/resume checkpoints, incident tracking, integrity-checked snapshots, recovery/restore controls, resource degradation signals, and distributed lease/fencing support.
-
-The Control Room exposes reliability telemetry and recovery controls so failures can be investigated instead of silently disappearing.
-
----
-
-## 🏭 Production & Real-World Integration
-
-The repository provides the common contracts and safety boundaries. Third-party accounts, provider-specific credentials, physical devices, mTLS certificates and off-site infrastructure must be supplied by the deployment; HERMUS never invents those secrets.
-
-Remaining deployment validation includes real worker nodes, provider authentication, physical voice devices, off-site backup drills, mTLS and failure-injection testing on the target hardware/network.
-
-See `docs/PRODUCTION_AND_REAL_WORLD_INTEGRATION.md` and `docs/PHASE_18_RELIABILITY_RECOVERY.md`.
-
-The Nexus Control Room also includes a discovery-driven **JARVIS × FAIRY model environment**: models are discovered from configured runtimes, selected by role or Auto mode, validated through the canonical ModelGateway, and never hardcoded into the dashboard. See `docs/JARVIS_FAIRY_ENVIRONMENT_SPEC.md`.
-
----
-
-## ✨ Features
-
-### 🎯 Core Capabilities
-
-| Feature | Description |
-|---------|-------------|
-| 🧠 **Autonomous Missions** | Objective-driven planning, execution, verification, repair and proof |
-| 💻 **SWE Mode** | Full software-engineering workflow: inspect, edit, build, test, debug, review, package |
-| 👥 **Multi-Agent** | Subagents, DAGs, delegation trees and parallel workstreams |
-| 🏛️ **AI Counsel** | Multiple agent roles can propose, critique, deliberate, vote and synthesize |
-| 🔄 **Self-Improving** | Successful trajectories become reusable skills |
-| 🧠 **Project Memory** | SQLite-backed memory with FTS5 retrieval and optional vector search |
-| 📚 **Lessons Loop** | Corrections and failures become reusable lessons |
-| ✅ **Verification** | Domain-specific verification plus offline evaluation harness |
-| 🧪 **Agent Harness** | Run task suites against **any configured model** (API-key/auth hosted providers or local ollama — `hermus harness models`, `--model auto\|groq\|ollama/...`) in isolated workspaces, verify with checks, JSON/markdown reports + multi-model comparison (`hermus harness run <suite>`) |
-| ⚡ **Sentinel (always-alert core)** | Event-driven FAIRY layer: reacts to the event bus **inline/instantly** (no polling), salience-scored decisions, LLM triage with any model, never idles — `hermus sentinel run` + autostart via `hermus sentinel install`; measurable via `hermus harness run sentinel` |
-| 🔒 **Sandboxing** | Policy-controlled command execution with isolation backends |
-
-### 🌐 Gateway & Integrations
-
-- **CLI** — Full command-line interface
-- **Web Dashboard** — Live task progress, agents, telemetry and system state
-- **Telegram / Discord / Slack** — Integration capabilities when configured
-- **Voice** — Local speech-to-text and text-to-speech capabilities
-- **Computer Control** — Browser automation and system interaction
-
-### 🛡️ Safety & Trust
-
-- **Red Line Policy** — Clear boundaries for autonomous actions
-- **Approval System** — Scoped grants for yellow-zone actions
-- **Emergency Brake** — Immediate stop capability
-- **Audit Logs** — Action tracking and review
-- **Verification** — completion is not treated as success without appropriate verification
-- **Capability Boundaries** — self-improvement cannot silently disable protected safety controls
-- **Sandboxing** — Multiple isolation backends where supported
-
----
-
-## 🎨 Control Room Dashboard
-
-The **Control Room** at `http://localhost:8000/control` is the operational command center:
-
-- **📊 Overview** — System health and event log
-- **🎭 Presence** — Agent identity, state, goals and continuity
-- **🎤 Voice** — Speech capabilities
-- **📋 Jobs** — Queue management and execution tracking
-- **🚀 Missions** — Autonomous task management
-- **📈 Telemetry** — Live runtime information
-- **💻 Computer** — System automation and control
-- **🔗 Remote** — External integrations
-- **🛡️ Safety** — Red lines, approvals and emergency controls
-- **🧰 Reliability** — Incidents, circuits, checkpoints, backups and recovery
-- **🧠 Model Core** — Runtime-discovered models, role selection and capability fit
-- **✨ Fairy Attention** — Proactive priorities, incidents, tasks and world signals
-- **⚙️ Systems** — Subsystem health
-
----
-
-## 🚀 Usage Examples
-
-```bash
-hermus mission start "Build and test a web application that does X"
-hermus swe run "Fix the failing tests and package the project"
-hermus counsel run "Compare three architectures and synthesize the tradeoffs"
-hermus harness run smoke --model mock/mock   # measure the agent on a task suite (offline)
-hermus harness models                        # every model it can see (API keys + local + mock)
-hermus harness compare <run_a> <run_b>       # A/B two runs
-hermus sentinel run --model auto             # always-alert core: instant event reaction, never idles
-hermus sentinel install                      # autostart on boot (systemd / Termux / cron)
-hermus doctor
-```
-
-Harness: `docs/HARNESS.md` · Sentinel: `docs/SENTINEL.md` · Always-on: `docs/ALWAYS_ON.md`
-
-Easy mode: `hermus check` (offline selfcheck + scoreboard) · `hermus harness run` with no args runs every builtin suite · `hermus doctor --harness` for always-on health.
-
----
-
-## 🔧 Configuration
-
-HERMUS is configured through environment variables. See `.env.example` for available options.
-
-Third-party credentials are deployment-specific and must be supplied by the operator.
-
----
-
-## 📚 Documentation
+## Documentation
 
 | Document | Purpose |
 |---|---|
-| `QUICKSTART.md` | Installation and CLI cheatsheet |
+| `QUICKSTART.md` | The same story, with the common questions answered |
+| `docs/DEVELOPERS.md` | Every developer command, the gates, and the surfaces |
+| `CHANGES.md` | What changed, measured, in order |
 | `ARCHITECTURE.md` | Canonical architecture reference |
-| `LIVING_CONTROL_ROOM.md` | Control Room design and features |
-| `RED_LINES.md` | Safety boundaries |
-| `AUTONOMY_BOUNDARIES.md` | Autonomy and capability boundaries |
-| `CAPABILITY_LEDGER.md` | Capability ledger |
-| `docs/PHASE_18_RELIABILITY_RECOVERY.md` | Reliability and recovery |
-| `docs/JARVIS_FAIRY_ROADMAP.md` | Long-term roadmap |
-| `docs/JARVIS_FAIRY_ENVIRONMENT.md` | JARVIS/Fairy environment direction and dynamic model policy |
+| `RED_LINES.md` | What it will never do, and why |
+| `docs/HARNESS.md` | Measuring the agent on task suites |
+| `docs/presence.md` | The floating character and its pointer |
 
----
+## Developers
 
-## 🛠️ Model Providers
-
-HERMUS supports local models, OpenAI-compatible endpoints and configured hosted providers. No provider credentials are bundled with the repository.
-
----
-
-## 🤝 Contributing
+`hermus --help` lists three commands first, then everything else under a
+Developers heading. The long form of that list is `docs/DEVELOPERS.md`: missions,
+harnesses, model fleets, routing, the sentinel, multi-key fan-out, the presence
+shell and self-improvement are all still there, all one command away, and none of
+them needed to use the product.
 
 ```bash
-git clone https://github.com/trmv2007-bot/hermus-agent-free.git
-cd hermus-agent-free
-./setup.sh
+./setup.sh          # Windows: .\setup.cmd
+make test           # pytest tests/ (skips tests/eval), about a minute
+make lint           # ruff, line length 130
+make typecheck
 ```
 
-For Windows, use `setup.cmd` or `setup.ps1`.
+## License
 
----
-
-## 📜 License
-
-HERMUS Agent Free is released under the **MIT License**. See `LICENSE`.
-
----
-
-<p align="center">
-  <strong>⚡ HERMUS Agent Free — Build, Research, Automate, Remember, Verify, Improve.</strong>
-</p>
+MIT. See `LICENSE`.

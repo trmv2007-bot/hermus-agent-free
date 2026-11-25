@@ -15,8 +15,7 @@ import argparse
 from core.config import config
 from core.log import setup_logging
 
-from . import g_agents, g_memory, g_models, g_runtime, g_safety, g_self, g_undo, g_workspace
-from . import repl as repl_cmd
+from . import _help, g_agents, g_memory, g_models, g_runtime, g_safety, g_self, g_undo, g_workspace, start
 from ._common import CLIContext
 from ._spec import Command, CommandModule
 
@@ -38,13 +37,34 @@ assert len(SPECS) == len(COMMANDS), "duplicate command name in the group modules
 assert len({spec.run for spec in SPECS}) == len(SPECS), "two commands share one handler"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Hermus Agent Free - The agent that grows with you, 100% free, no paywall", prog="hermus"
-    )
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
+class Parser(argparse.ArgumentParser):
+    """The parser, with a help page that leads with three commands.
 
-    # Default: start TUI chat
+    Argument parsing is argparse's; only ``--help`` is ours, because the flat
+    list of every command the repository owns is a developer index, not a way
+    in. See :mod:`hermus_cli._help`.
+    """
+
+    def __init__(self, *args, specs: tuple[Command, ...] = (), **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.specs = specs
+
+    def format_help(self) -> str:
+        return _help.render(self, self.specs)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = Parser(
+        description="Hermus - a free companion that runs on your own computer.",
+        prog="hermus",
+        specs=SPECS,
+    )
+    # The usage line names one placeholder instead of every command, since the
+    # commands now live in two sections of the help rather than in one list.
+    # Sub-parsers stay ordinary ``ArgumentParser``s: only the top level has two
+    # sections to show, and ``<command> --help`` is that command's own page.
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>", parser_class=argparse.ArgumentParser)
+
     parser.add_argument(
         "--model",
         default=config.model,
@@ -80,7 +100,7 @@ def main() -> None:
     args = parser.parse_args()
     ctx = CLIContext(parser=parser)
     if args.command is None:
-        repl_cmd.run_default(args, ctx)
+        start.run(args, ctx)
         return
     COMMANDS[args.command].run(args, ctx)
 

@@ -133,13 +133,25 @@ def test_every_command_with_required_args_is_covered():
     assert needing_args == set(MINIMAL_ARGV), f"commands requiring args changed: {needing_args ^ set(MINIMAL_ARGV)}"
 
 
-def test_main_with_no_command_starts_the_default_repl(monkeypatch):
-    """Bare `hermus` is the documented chat entry point, not an accident."""
-    calls: list[object] = []
-    monkeypatch.setattr("hermus_cli.repl.run_default", lambda args, ctx: calls.append(args))
+def test_main_with_no_command_opens_the_room(monkeypatch):
+    """Bare `hermus` starts the product: a gateway if needed, then the room.
+
+    The terminal chat is still reachable, but as `hermus tui` — a person who
+    types one word wants the companion, not a prompt.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr("hermus_cli.start.run", lambda args, ctx: calls.append("start"))
     monkeypatch.setattr("sys.argv", ["hermus"])
     main()
-    assert len(calls) == 1, "bare `hermus` must delegate to the repl default"
+    assert calls == ["start"], "bare `hermus` must run the start path"
+
+
+def test_the_terminal_chat_is_still_its_own_command(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr("hermus_cli.repl.run_default", lambda args, ctx: calls.append("tui"))
+    monkeypatch.setattr("sys.argv", ["hermus", "tui"])
+    main()
+    assert calls == ["tui"], "`hermus tui` no longer reaches the terminal chat"
 
 
 # ---------------------------------------------------------------------------

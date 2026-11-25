@@ -1303,3 +1303,55 @@ still resolves to `watch` from its decisions after the name is gone. Records fro
 an older install that hold only a label load and resolve exactly as before, and a
 decision the person edits by hand in Approvals still wins, because a hand edit can
 only ever make the resolved label more conservative.
+
+---
+
+## One story — the companion is the first impression, and the docs say it
+
+The product is install → it answers before it asks → the room → three commands. The
+repository said something else: `hermus` on its own opened a terminal chat, `hermus
+--help` printed fifty-one commands in one flat list with `mission`, `harness`,
+`fleet` and `router` indistinguishable from `undo`, and the README carried a
+"Control Room Dashboard" section with emoji headers describing an operator-panel
+product that no longer exists on the first screen. Everything below makes the
+repository describe the thing that ships.
+
+**The one command is the product.** `hermus` with no arguments now starts the
+gateway if one is not answering and opens the room; `bin/hermus` runs the install
+first when the `.venv` is missing, so one word covers a fresh machine. A gateway
+already answering on the port is opened, never started twice. The terminal chat is
+kept as `hermus tui` — nothing was deleted.
+
+**Three commands, then a developer section.** `hermus --help` opens with exactly
+`hermus`, `hermus undo` and `hermus understand`, one plain sentence each, and every
+other command is listed under a Developers heading that points at the new
+`docs/DEVELOPERS.md`. That document carries the full list grouped by what each
+command is for. The help page is rendered from the same `SPECS` table the
+dispatcher reads, so a command cannot exist and be missing from it, and it is
+ASCII-safe because the Windows console is cp1252.
+
+**The room stops speaking operator.** The index behind Ctrl P described its doors
+as "scoped grants and pending prompts", "doctor and engine probes" and "delegation
+and the harness"; it now describes where a person is going ("requests waiting for
+your yes", "the developer console", "helpers working in parallel"). The Diagnostics
+disclosure no longer says "probe panels". A failure path told people to "Grant it in
+Systems → Approvals", where Systems has no Approvals row; it now says the request
+arrived without a card and asks again. The first-run model count says "1 model"
+rather than "model(s)".
+
+**One story in the docs.** `README.md` and `QUICKSTART.md` are rewritten in the same
+order — what it is, install, first run, use it, the three commands, what it will not
+do, build status, developers — with no emoji headers, no "Reliability & Recovery"
+section, no nullable "Features" table and no stale Control Room section. The
+build-status table is re-cut so every row is something a person gets, backed by the
+test that proves it (`tests/browser/test_room.py`, `test_surfaces.py`,
+`test_first_answer.py`, `test_room_thinking.py`, `test_undo_guarantee.py`,
+`test_self_model.py` and the rest). The hero image is the room at 1440, captured
+from the build, rather than a logo.
+
+**Verification.** `tests/test_cli_help.py` holds both help sections and the start
+path: the first section is exactly three commands, every command is still listed
+under Developers, a bare `hermus` runs the start path, and a gateway that already
+answers is opened without spawning a second one. `tests/browser/test_surfaces.py`
+extends the operator-vocabulary guard to "panels" and "probes" and applies it to the
+room's own index and to the Diagnostics disclosure, so the leak cannot come back.
