@@ -73,6 +73,15 @@ TASK_ENV = {
     # A web tool must not be able to hang the benchmark on someone's network.
     "HERMUS_WEB_TIMEOUT": "5",
     "HERMUS_WEB_BROWSER_TIMEOUT": "10",
+    # One BLAS thread per task process. Each child imports the numerical stack
+    # once, and on a machine already running the product's own servers the
+    # default thread pools reserve more memory than the task needs — measured
+    # here as "OpenBLAS error: Memory allocation still failed" before the turn
+    # even started.
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
 }
 
 
@@ -141,7 +150,13 @@ def _stdout_blob(result: dict) -> str:
 
 
 def check_tool_stdout_contains(result, sandbox: Path, args: dict) -> tuple[bool, str]:
-    if str(args["value"]) in _stdout_blob(result) or str(args["value"]) in str(result.get("response") or ""):
+    """The value must come out of a tool's output, not out of the model's prose.
+
+    A model that repeats the token from the prompt without running anything has
+    not done the task, and counting its prose here is how a tool-use score gets
+    inflated by a model that never calls a tool.
+    """
+    if str(args["value"]) in _stdout_blob(result):
         return True, ""
     calls = [str(tr.get("tool")) for tr in _tool_results(result)]
     return False, f"no shell output contained {args['value']!r} (tools called: {calls or 'none'})"
@@ -163,6 +178,190 @@ def check_plan_and_files(result, sandbox: Path, args: dict) -> tuple[bool, str]:
         return False, f"the plan had {len(steps)} step(s), expected at least {args['min_steps']}"
     if not any(s.get("status") == "done" for s in steps):
         return False, "no plan step was ever backed by a tool result"
+    return True, ""
+
+
+# ------------------------------------------------------- tool-use grading
+# The tool-use suite grades behaviour, not prose: which tool was called, with
+# which arguments, and what happened to the world. These checks are what make a
+# 1B and an 8B separable instead of both "answering something plausible".
+
+#: argument names that carry a path, so a relative and an absolute form match
+_PATH_KEYS = ("path", "destination", "file", "directory", "dir")
+
+
+def _arg_matches(key: str, expected, actual) -> bool:
+    if isinstance(actual, (int, float)) and not isinstance(actual, bool):
+        try:
+            return float(actual) == float(expected)
+        except (TypeError, ValueError):
+            return False
+    actual_text = str(actual if actual is not None else "").strip()
+    expected_text = str(expected).strip()
+    if str(key).lower() in _PATH_KEYS:
+        return Path(actual_text.replace("\\", "/")).name == Path(expected_text.replace("\\", "/")).name
+    return actual_text == expected_text
+
+
+def _tool_satisfied(result: dict, tool: str, expected: dict | None = None) -> bool:
+    """Was this tool called at least once with arguments matching ``expected``?"""
+    needle = str(tool).lower()
+    for tr in _tool_results(result):
+        if needle not in str(tr.get("tool") or "").lower():
+            continue
+        called = dict(tr.get("args") or {})
+        if all(_arg_matches(key, value, called.get(key)) for key, value in (expected or {}).items()):
+            return True
+    return False
+
+
+def _called_tools(result: dict) -> list[str]:
+    return [str(tr.get("tool") or "") for tr in _tool_results(result)]
+
+
+def check_file_equals_and_args(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    ok, reason = check_file_equals(result, sandbox, {"path": args["path"], "value": args["value"]})
+    if not ok:
+        return ok, reason
+    tool = str(args.get("tool") or "")
+    expected = {"path": args["tool_arg_path"]} if args.get("tool_arg_path") else {}
+    if tool and not _tool_satisfied(result, tool, expected):
+        return (
+            False,
+            f"the file is right but {tool} was not called with the expected arguments ({_called_tools(result) or 'no tool calls'})",
+        )
+    also = str(args.get("also_tool") or "")
+    if also and not _tool_satisfied(result, also):
+        return False, f"{also} was never called, so the step it proves did not happen"
+    return True, ""
+
+
+def check_file_lines_and_args(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    ok, reason = check_file_lines(result, sandbox, {"path": args["path"], "values": args["values"]})
+    if not ok:
+        return ok, reason
+    tool = str(args.get("tool") or "")
+    if tool and not _tool_satisfied(result, tool):
+        return False, f"the file is right but {tool} was not the tool used ({_called_tools(result) or 'no tool calls'})"
+    return True, ""
+
+
+def check_file_regex_and_args(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    ok, reason = check_file_contains_regex(sandbox, args["path"], args["pattern"])
+    if not ok:
+        return False, reason
+    forbidden = str(args.get("forbidden") or "")
+    if forbidden and forbidden.lower() in _read(sandbox / args["path"]).lower():
+        return False, f"{args['path']} still contains {forbidden!r}"
+    tool = str(args.get("tool") or "")
+    if tool and not _tool_satisfied(result, tool):
+        return False, f"{tool} was not the tool used ({_called_tools(result) or 'no tool calls'})"
+    return True, ""
+
+
+def check_file_contains_regex(sandbox: Path, path: str, pattern: str) -> tuple[bool, str]:
+    import re
+
+    target = sandbox / path
+    if not target.exists():
+        return False, f"{path} was never created"
+    if not re.search(pattern, _read(target), re.I):
+        return False, f"{path} does not match {pattern!r}"
+    return True, ""
+
+
+def check_answer_and_file(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    ok, reason = check_answer_contains(result, sandbox, {"value": args["value"]})
+    if not ok:
+        return ok, reason
+    path = sandbox / args["path"]
+    if not path.exists():
+        return False, f"{args['path']} was never created"
+    if args.get("unchanged") is not None and _read(path).strip() != str(args["unchanged"]).strip():
+        return False, f"{args['path']} was modified when it should not have been"
+    return True, ""
+
+
+def check_answer_and_tool(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    ok, reason = check_answer_contains(result, sandbox, {"value": args["value"]})
+    if not ok:
+        return ok, reason
+    tool = str(args.get("tool") or "")
+    if tool and not _tool_satisfied(result, tool):
+        return False, f"{tool} was not called ({_called_tools(result) or 'no tool calls'})"
+    return True, ""
+
+
+def check_no_tool_calls_and_answer(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    if _tool_results(result):
+        return False, f"it called tools when none was needed ({_called_tools(result)[:4]})"
+    return check_answer_contains(result, sandbox, {"value": args["value"]})
+
+
+def check_no_tool_calls_and_regex(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    if _tool_results(result):
+        return False, f"it called tools when none was needed ({_called_tools(result)[:4]})"
+    import re
+
+    if not re.search(str(args["pattern"]), str(result.get("response") or ""), re.I):
+        return False, "the answer never actually explains the thing"
+    return True, ""
+
+
+def check_single_line(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    import re
+
+    answer = str(result.get("response") or "").strip()
+    if "\n" in answer.strip("\n").strip():
+        return False, f"the answer was more than one line: {answer[:80]!r}"
+    if not re.fullmatch(str(args["pattern"]), answer, re.I | re.S):
+        return False, f"the single line was {answer[:80]!r}, not the required format"
+    return True, ""
+
+
+def check_bullets(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    lines = [line.strip() for line in str(result.get("response") or "").splitlines() if line.strip()]
+    bullets = [line for line in lines if line[:1] in ("-", "*", "•")]
+    want = int(args["count"])
+    if len(lines) != want or len(bullets) != want:
+        return False, f"expected {want} bullet lines, got {len(bullets)} bullet(s) in {len(lines)} line(s)"
+    joined = " ".join(bullets).lower()
+    missing = [word for word in args.get("keywords") or [] if str(word).lower() not in joined]
+    if missing:
+        return False, f"the bullets never mention {missing}"
+    return True, ""
+
+
+def check_json_keys(result, sandbox: Path, args: dict) -> tuple[bool, str]:
+    """The whole answer must be the JSON object, with the right value types.
+
+    Extracting an object from surrounding prose and stringifying its values
+    would pass an answer that ignored the "only a JSON object" instruction and
+    that returned `"4"` where the number 4 was asked for.
+    """
+    text = str(result.get("response") or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        found = json.loads(text)
+    except ValueError:
+        return False, f"the answer was not JSON on its own: {text[:80]!r}"
+    if not isinstance(found, dict):
+        return False, "the answer was not a JSON object"
+    for key, expected in (args.get("keys") or {}).items():
+        if key not in found:
+            return False, f"the JSON has no {key!r} key"
+        actual = found[key]
+        if isinstance(expected, bool) or isinstance(actual, bool):
+            ok = actual is expected
+        elif isinstance(expected, (int, float)):
+            ok = isinstance(actual, (int, float)) and float(actual) == float(expected)
+        else:
+            ok = str(actual).strip().lower() == str(expected).strip().lower()
+        if not ok:
+            return False, f"{key!r} was {actual!r} ({type(actual).__name__}), expected {expected!r}"
     return True, ""
 
 
@@ -212,6 +411,16 @@ CHECKS: dict[str, Callable[[dict, Path, dict], tuple[bool, str]]] = {
     "plan_and_files": check_plan_and_files,
     "refused": check_refused,
     "honest_failure": check_honest_failure,
+    "file_equals_and_args": check_file_equals_and_args,
+    "file_lines_and_args": check_file_lines_and_args,
+    "file_regex_and_args": check_file_regex_and_args,
+    "answer_and_file": check_answer_and_file,
+    "answer_and_tool": check_answer_and_tool,
+    "no_tool_calls_and_answer": check_no_tool_calls_and_answer,
+    "no_tool_calls_and_regex": check_no_tool_calls_and_regex,
+    "single_line": check_single_line,
+    "bullets": check_bullets,
+    "json_keys": check_json_keys,
 }
 
 
@@ -355,11 +564,13 @@ def run_one(task: dict, *, model: str, base_url: str) -> dict[str, Any]:
         passed, reason = False, f"the turn ran on {model_ran}, not the model under test ({model})"
     row = {
         "id": task["id"],
-        "kind": task["kind"],
+        "kind": str(task.get("kind") or task.get("category") or "general"),
+        "category": str(task.get("category") or task.get("kind") or "general"),
         "passed": bool(passed),
         "reason": "" if passed else reason,
         "steps": int(result.get("steps") or 0),
         "seconds": elapsed,
+        "repaired": bool(result.get("repaired")),
         "tier": routing.get("tier") or "unrouted",
         "model_ran": model_ran,
         "rate_limited": rate_limited,
@@ -368,6 +579,7 @@ def run_one(task: dict, *, model: str, base_url: str) -> dict[str, Any]:
         "receipt_verdict": receipt.get("verdict", ""),
         "plan_steps": len((result.get("plan") or {}).get("steps") or []),
         "tool_calls": [str(tr.get("tool")) for tr in tool_results][:12],
+        "tool_calls_count": len(tool_results),
         "failed_calls": failed_calls,
         "answer": str(result.get("response") or "")[:400],
         "error": error,
@@ -403,7 +615,9 @@ def _stops_run(row: dict) -> bool:
     return bool(row.get("rate_limited")) and not row.get("passed")
 
 
-def _task_row(task: dict, *, model: str, base_url: str, timeout: float, work: Path) -> dict[str, Any]:
+def _task_row(
+    task: dict, *, model: str, base_url: str, timeout: float, work: Path, tasks_file: Path = TASKS_FILE
+) -> dict[str, Any]:
     """Run one task in its own process, so no state survives into the next one."""
     task_id = str(task["id"])
     task_work = work / task_id
@@ -414,6 +628,8 @@ def _task_row(task: dict, *, model: str, base_url: str, timeout: float, work: Pa
         str(HERE / "thinking_bench.py"),
         "--task",
         task_id,
+        "--tasks",
+        str(tasks_file),
         "--model",
         model,
         "--base-url",
@@ -423,9 +639,12 @@ def _task_row(task: dict, *, model: str, base_url: str, timeout: float, work: Pa
     ]
     blank = {
         "id": task_id,
-        "kind": task["kind"],
+        "kind": str(task.get("kind") or task.get("category") or "general"),
+        "category": str(task.get("category") or task.get("kind") or "general"),
         "passed": False,
         "steps": 0,
+        "seconds": 0.0,
+        "repaired": False,
         "tier": "",
         "model_ran": "",
         "rate_limited": False,
@@ -433,34 +652,44 @@ def _task_row(task: dict, *, model: str, base_url: str, timeout: float, work: Pa
         "receipt_verdict": "",
         "plan_steps": 0,
         "tool_calls": [],
+        "tool_calls_count": 0,
         "failed_calls": 0,
         "answer": "",
         "skipped": False,
     }
     started = time.time()
-    proc = subprocess.Popen(
-        cmd,
-        env=isolate_env(task_work, model=model),
-        # The task's own directory, never the checkout: a model that drops an
-        # absolute path writes its file here instead of into the repo.
-        cwd=str(task_work),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    try:
-        _, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_tree(proc)
-        return {
-            **blank,
-            "reason": f"timed out after {int(timeout)}s",
-            "seconds": round(time.time() - started, 1),
-            "tier": "timeout",
-        }
-    stderr = (stderr or "")[-400:]
+    # The child's output goes to its own files rather than a pipe: the turn is
+    # chatty, and a task that hangs must leave a log saying where it stopped.
+    stdout_path = task_work / "stdout.log"
+    stderr_path = task_work / "stderr.log"
+    with (
+        stdout_path.open("w", encoding="utf-8", errors="replace") as out,
+        stderr_path.open("w", encoding="utf-8", errors="replace") as err,
+    ):
+        proc = subprocess.Popen(
+            cmd,
+            env=isolate_env(task_work, model=model),
+            # The task's own directory, never the checkout: a model that drops an
+            # absolute path writes its file here instead of into the repo.
+            cwd=str(task_work),
+            stdout=out,
+            stderr=err,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            return {
+                **blank,
+                "reason": f"timed out after {int(timeout)}s",
+                "seconds": round(time.time() - started, 1),
+                "tier": "timeout",
+            }
+    stderr = _read(stderr_path)[-400:]
     if out_file.exists():
         return json.loads(out_file.read_text(encoding="utf-8"))
     return {**blank, "reason": f"the task process died: {stderr[-200:] or 'no output'}", "seconds": 0.0}
@@ -488,6 +717,27 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def holdout_split(tasks: list[dict], rotation: int) -> dict[str, str]:
+    """Assign each task to ``graded`` or ``holdout``, rotating a quarter out per category.
+
+    Deterministic for a given rotation and different for the next one, so a
+    selection tuned to one graded subset cannot survive the next run: the tasks
+    it learned from are not the tasks it is graded on again.
+    """
+    by_category: dict[str, list[dict]] = {}
+    for task in tasks:
+        category = str(task.get("category") or task.get("kind") or "general")
+        by_category.setdefault(category, []).append(task)
+    split: dict[str, str] = {}
+    for items in by_category.values():
+        ordered = sorted(items, key=lambda item: str(item.get("id")))
+        keep = min(max(1, round(len(ordered) / 4)), max(0, len(ordered) - 1))
+        held = {(rotation + index) % len(ordered) for index in range(keep)}
+        for index, task in enumerate(ordered):
+            split[str(task["id"])] = "holdout" if index in held else "graded"
+    return split
+
+
 def run_bench(
     *,
     model: str,
@@ -498,12 +748,23 @@ def run_bench(
     stop_on_rate_limit: bool = True,
     pace_seconds: float = 0.0,
     throttle_retries: int = 1,
+    tasks_file: Path = TASKS_FILE,
+    holdout: bool = False,
+    rotation: int = 0,
+    only: list[str] | None = None,
 ) -> dict[str, Any]:
     work = Path(work) if work else Path(tempfile.mkdtemp(prefix="hermus_bench_"))
     work.mkdir(parents=True, exist_ok=True)
-    tasks = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+    # Absolute: the per-task child runs in its own scratch directory, so a
+    # relative suite path would resolve against the wrong root.
+    tasks_file = Path(tasks_file).resolve()
+    tasks = json.loads(tasks_file.read_text(encoding="utf-8"))
+    if only:
+        wanted = {str(item).strip() for item in only if str(item).strip()}
+        tasks = [task for task in tasks if str(task["id"]) in wanted]
     if limit:
         tasks = tasks[: int(limit)]
+    split = holdout_split(tasks, rotation) if holdout else {str(task["id"]): "graded" for task in tasks}
     server, base_url = start_page_server()
 
     rows: list[dict[str, Any]] = []
@@ -511,6 +772,7 @@ def run_bench(
     limited_at = ""
     try:
         for task in tasks:
+            task_id = str(task["id"])
             reason = ""
             if limited_at:
                 reason = f"skipped: the free tier rate-limited the run at {limited_at}"
@@ -519,12 +781,15 @@ def run_bench(
             if reason:
                 rows.append(
                     {
-                        "id": task["id"],
-                        "kind": task["kind"],
+                        "id": task_id,
+                        "kind": str(task.get("kind") or task.get("category") or "general"),
+                        "category": str(task.get("category") or task.get("kind") or "general"),
+                        "split": split.get(task_id, "graded"),
                         "passed": False,
                         "reason": reason,
                         "steps": 0,
                         "seconds": 0.0,
+                        "repaired": False,
                         "tier": "skipped",
                         "model_ran": "",
                         "rate_limited": False,
@@ -532,17 +797,18 @@ def run_bench(
                         "receipt_verdict": "",
                         "plan_steps": 0,
                         "tool_calls": [],
+                        "tool_calls_count": 0,
                         "failed_calls": 0,
                         "answer": "",
                         "error": "",
                         "skipped": True,
                     }
                 )
-                print(f"[SKIP] {task['id']:<22} {reason}")
+                print(f"[SKIP] {task_id:<22} {reason}")
                 continue
             if pace_seconds and rows:
                 time.sleep(pace_seconds)
-            row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work)
+            row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work, tasks_file=tasks_file)
             # A free tier refuses requests in bursts (measured: two answers, then
             # about a minute of 429s). A task the tier turned away before it could
             # act is re-run once after waiting out the window; that is a scheduling
@@ -550,20 +816,30 @@ def run_bench(
             waits = 0
             while throttle_retries > 0 and waits < throttle_retries and _stops_run(row) and not limited_at:
                 waits += 1
-                print(f"  ... {task['id']} was rate-limited; waiting {int(pace_seconds) or 60}s for the window")
+                print(f"  ... {task_id} was rate-limited; waiting {int(pace_seconds) or 60}s for the window")
                 time.sleep(pace_seconds or 60.0)
-                row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work)
+                row = _task_row(task, model=model, base_url=base_url, timeout=task_timeout, work=work, tasks_file=tasks_file)
             row["throttled_retries"] = waits
             row["skipped"] = False
+            row["split"] = split.get(task_id, "graded")
             rows.append(row)
             if stop_on_rate_limit and not limited_at and _stops_run(row):
-                limited_at = row["id"]
+                limited_at = task_id
             mark = "PASS" if row["passed"] else "FAIL"
-            print(f"[{mark}] {row['id']:<22} {row['steps']} step(s) {row['seconds']:>6.1f}s  {row['reason'][:90]}")
+            tag = "" if row["split"] == "graded" else " [held out]"
+            print(f"[{mark}] {task_id:<22} {row['steps']} step(s) {row['seconds']:>6.1f}s  {row['reason'][:90]}{tag}")
     finally:
         server.shutdown()
 
-    report = summarise(rows, model=model, wall=round(time.time() - started, 1), work=str(work))
+    report = summarise(
+        rows,
+        model=model,
+        wall=round(time.time() - started, 1),
+        work=str(work),
+        holdout=holdout,
+        rotation=rotation,
+        tasks_file=tasks_file,
+    )
     report["rate_limited_at"] = limited_at
     report["started_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(started))
     report["git_sha"] = _git_sha()
@@ -579,30 +855,123 @@ def _git_sha() -> str:
         return ""
 
 
-def summarise(rows: list[dict], *, model: str, wall: float, work: str) -> dict[str, Any]:
-    ran = [r for r in rows if not r.get("skipped")]
-    passed = [r for r in ran if r["passed"]]
-    change_tasks = [r for r in ran if r["kind"] in CHANGE_KINDS]
-    verified_change = [r for r in change_tasks if r.get("verified") is True]
-    failures = [r for r in ran if not r["passed"]]
+def _tally(rows: list[dict]) -> dict[str, Any]:
+    """One block of numbers, from a set of task rows."""
+    passed = [row for row in rows if row["passed"]]
+    change_tasks = [row for row in rows if row["kind"] in CHANGE_KINDS]
+    verified_change = [row for row in change_tasks if row.get("verified") is True]
+    by_category: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        category = str(row.get("category") or row.get("kind") or "general")
+        block = by_category.setdefault(
+            category,
+            {
+                "ran": 0,
+                "passed": 0,
+                "steps": 0.0,
+                "seconds": 0.0,
+                "repaired": 0,
+                "tool_calls": 0,
+                "first_pass": 0,
+                "change": 0,
+                "verified": 0,
+            },
+        )
+        block["ran"] += 1
+        block["passed"] += 1 if row["passed"] else 0
+        block["first_pass"] += 1 if row["passed"] and not row.get("repaired") else 0
+        if row.get("kind") in CHANGE_KINDS:
+            block["change"] += 1
+            block["verified"] += 1 if row.get("verified") is True else 0
+        block["steps"] += float(row.get("steps") or 0)
+        block["seconds"] += float(row.get("seconds") or 0)
+        block["repaired"] += 1 if row.get("repaired") else 0
+        block["tool_calls"] += int(row.get("tool_calls_count") or 0)
+    categories = {}
+    for name, block in by_category.items():
+        count = max(1, block["ran"])
+        categories[name] = {
+            "category": name,
+            "ran": block["ran"],
+            "passed": block["passed"],
+            "pass_rate": round(block["passed"] / count, 3),
+            "first_pass": block["first_pass"],
+            "steps_per_task": round(block["steps"] / count, 2),
+            "seconds_per_task": round(block["seconds"] / count, 2),
+            "tool_calls_per_task": round(block["tool_calls"] / count, 2),
+            "repaired": block["repaired"],
+            "repair_rate": round(block["repaired"] / count, 3),
+            "verification_rate": round(block["verified"] / block["change"], 3) if block["change"] else 0.0,
+            "verified_change_tasks": block["verified"],
+            "change_tasks": block["change"],
+        }
+    count = max(1, len(rows))
     return {
-        "model": model,
-        "model_ran": sorted({str(r.get("model_ran") or "") for r in ran if r.get("model_ran")}),
-        "tasks": len(rows),
-        "ran": len(ran),
+        "ran": len(rows),
         "passed": len(passed),
-        "pass_rate": round(len(passed) / len(ran), 3) if ran else 0.0,
-        "steps_total": sum(r["steps"] for r in ran),
-        "steps_per_task": round(sum(r["steps"] for r in ran) / len(ran), 2) if ran else 0.0,
+        "pass_rate": round(len(passed) / count, 3),
+        "first_passed": sum(1 for row in rows if row["passed"] and not row.get("repaired")),
+        "first_pass_rate": round(sum(1 for row in rows if row["passed"] and not row.get("repaired")) / count, 3),
+        "repair_rate": round(sum(1 for row in rows if row.get("repaired")) / count, 3),
+        "steps_total": sum(int(row.get("steps") or 0) for row in rows),
+        "steps_per_task": round(sum(int(row.get("steps") or 0) for row in rows) / count, 2),
+        "seconds_per_task": round(sum(float(row.get("seconds") or 0) for row in rows) / count, 2),
+        "tool_calls_per_task": round(sum(int(row.get("tool_calls_count") or 0) for row in rows) / count, 2),
         "verification_rate": round(len(verified_change) / len(change_tasks), 3) if change_tasks else 0.0,
         "verified_change_tasks": len(verified_change),
         "change_tasks": len(change_tasks),
-        "wall_seconds": wall,
-        "avg_seconds_per_task": round(wall / len(ran), 1) if ran else 0.0,
+        "categories": categories,
+    }
+
+
+def summarise(
+    rows: list[dict],
+    *,
+    model: str,
+    wall: float,
+    work: str,
+    holdout: bool = False,
+    rotation: int = 0,
+    tasks_file: Path = TASKS_FILE,
+) -> dict[str, Any]:
+    ran = [r for r in rows if not r.get("skipped")]
+    graded = [r for r in ran if r.get("split") != "holdout"]
+    held = [r for r in ran if r.get("split") == "holdout"]
+    failures = [r for r in ran if not r["passed"]]
+    graded_block = _tally(graded)
+    holdout_block = _tally(held) if held else {}
+    report: dict[str, Any] = {
+        "model": model,
+        "model_ran": sorted({str(r.get("model_ran") or "") for r in ran if r.get("model_ran")}),
+        "tasks": len(rows),
         "work_dir": work,
         "rows": rows,
         "failures": [{"id": r["id"], "reason": r.get("reason", "")} for r in failures],
+        "wall_seconds": wall,
+        "avg_seconds_per_task": round(wall / len(ran), 1) if ran else 0.0,
+        "holdout": bool(holdout),
+        "rotation": int(rotation),
+        "holdout_tasks": [r["id"] for r in held],
+        "graded_tasks": [r["id"] for r in graded],
+        "tasks_file": str(tasks_file),
     }
+    report.update(graded_block)
+    report["holdout_block"] = holdout_block
+    report["total"] = {
+        "ran": len(ran),
+        "passed": sum(1 for r in ran if r["passed"]),
+        "pass_rate": round(sum(1 for r in ran if r["passed"]) / len(ran), 3) if ran else 0.0,
+    }
+    try:
+        from core.model_measurement import HARNESS_VERSION, suite_fingerprint
+
+        tasks = json.loads(Path(tasks_file).read_text(encoding="utf-8"))
+        report["harness_version"] = HARNESS_VERSION
+        report["template_hash"] = suite_fingerprint(tasks)
+    except Exception:  # a report without the keys still measures something
+        report["harness_version"] = ""
+        report["template_hash"] = ""
+    return report
 
 
 def markdown(report: dict[str, Any]) -> str:
@@ -617,19 +986,44 @@ def markdown(report: dict[str, Any]) -> str:
     lines = [
         header,
         "",
-        f"Tasks passed **{report['passed']}/{report['ran']}** · steps/task **{report['steps_per_task']}** · "
-        f"verification rate **{report['verified_change_tasks']}/{report['change_tasks']}** change tasks · "
-        f"wall **{report['wall_seconds']}s**",
+        f"{'Graded tasks' if report.get('holdout') else 'Tasks'} passed **{report['passed']}/{report['ran']}** · "
+        f"first pass **{float(report.get('first_pass_rate') or 0.0):.0%}** · "
+        f"repair rate **{float(report.get('repair_rate') or 0.0):.0%}** · "
+        f"steps/task **{report.get('steps_per_task', 0)}** · "
+        f"tool calls/task **{report.get('tool_calls_per_task', 0)}** · "
+        f"verification rate **{report.get('verified_change_tasks', 0)}/{report.get('change_tasks', 0)}** change tasks · "
+        f"wall **{report.get('wall_seconds', 0)}s**",
+    ]
+    if report.get("holdout") and report.get("holdout_block"):
+        held = report["holdout_block"]
+        lines.append(
+            f"Held-out tasks (not used for selection this run): **{held['passed']}/{held['ran']}** · rotation {report.get('rotation')}"
+        )
+    if report.get("categories"):
+        lines += [
+            "",
+            "| category | passed | first pass | repair rate | verification | steps/task | s/task | tool calls/task |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for name, block in report["categories"].items():
+            verified = f"{block['verified_change_tasks']}/{block['change_tasks']}" if block.get("change_tasks") else "—"
+            lines.append(
+                f"| {name} | **{block['passed']}/{block['ran']}** | {block['first_pass']}/{block['ran']} | "
+                f"{block['repair_rate']:.0%} | {verified} | {block['steps_per_task']} | {block['seconds_per_task']} | "
+                f"{block['tool_calls_per_task']} |"
+            )
+    lines += [
         "",
-        "| task | kind | result | steps | wall | routed | receipt | why it failed |",
-        "|---|---|---|---|---|---|---|---|",
+        "| task | category | split | result | steps | wall | routed | receipt | repaired | why it failed |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in report["rows"]:
         result = "skipped" if row.get("skipped") else ("pass" if row["passed"] else "fail")
         receipt = {True: "verified", False: "unverified", None: "—"}[row.get("verified")]
         lines.append(
-            f"| {row['id']} | {row['kind']} | {result} | {row['steps']} | {row.get('seconds', 0.0)}s | "
-            f"{row.get('tier', '')} | {receipt} | {row.get('reason', '')[:90]} |"
+            f"| {row['id']} | {row.get('category', '')} | {row.get('split', 'graded')} | {result} | {row['steps']} | "
+            f"{row.get('seconds', 0.0)}s | {row.get('tier', '')} | {receipt} | {'yes' if row.get('repaired') else 'no'} | "
+            f"{row.get('reason', '')[:90]} |"
         )
     return "\n".join(lines)
 
@@ -637,8 +1031,8 @@ def markdown(report: dict[str, Any]) -> str:
 def comparison(reports: list[dict[str, Any]]) -> str:
     """The three-way table: same tasks, same harness, same machine."""
     lines = [
-        "| model | tier | tasks passed | steps/task | verification (change tasks) | wall | rate-limited |",
-        "|---|---|---|---|---|---|---|",
+        "| model | tier | graded passed | first pass | repair rate | steps/task | tool calls/task | wall | rate-limited |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for report in reports:
         from core.thinking.routing import tier_of
@@ -646,9 +1040,27 @@ def comparison(reports: list[dict[str, Any]]) -> str:
         tier = tier_of(report["model"])
         limited = f"at `{report['rate_limited_at']}`" if report.get("rate_limited_at") else "no"
         lines.append(
-            f"| `{report['model']}` | {tier} | **{report['passed']}/{report['ran']}** | {report['steps_per_task']} | "
-            f"{report['verified_change_tasks']}/{report['change_tasks']} | {report['wall_seconds']}s | {limited} |"
+            f"| `{report['model']}` | {tier} | **{report['passed']}/{report['ran']}** | "
+            f"{report['first_pass_rate']:.0%} | {report['repair_rate']:.0%} | {report['steps_per_task']} | "
+            f"{report['tool_calls_per_task']} | {report['wall_seconds']}s | {limited} |"
         )
+
+    categories = [name for name in (reports[0].get("categories") or {})] if reports else []
+    if categories:
+        head = "| category | " + " | ".join(f"`{r['model']}`" for r in reports) + " |"
+        lines += ["", head, "|---|" + "---|" * len(reports)]
+        for name in categories:
+            cells = []
+            for report in reports:
+                block = (report.get("categories") or {}).get(name)
+                cells.append(f"{block['passed']}/{block['ran']}" if block else "—")
+            lines.append(f"| {name} | " + " | ".join(cells) + " |")
+
+    held = [(r["model"], r["holdout_block"]) for r in reports if r.get("holdout_block")]
+    if held:
+        lines += ["", "| model | held-out tasks (validation only) |", "|---|---|"]
+        for model, block in held:
+            lines.append(f"| `{model}` | {block['passed']}/{block['ran']} |")
 
     ids = [row["id"] for row in reports[0]["rows"]] if reports else []
     if ids:
@@ -701,11 +1113,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-url", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--json-out", default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--tasks",
+        default=str(TASKS_FILE),
+        help="the suite to run: thinking_tasks.json (the original 15 tasks) or tool_tasks.json (the tool-use categories)",
+    )
+    parser.add_argument(
+        "--holdout",
+        action="store_true",
+        help="hold out a rotating quarter of each category: graded tasks decide selection, held-out tasks validate it",
+    )
+    parser.add_argument(
+        "--only",
+        default=None,
+        help="comma-separated task ids: run just these (a top-up for a run the budget cut short)",
+    )
+    parser.add_argument(
+        "--rotation",
+        type=int,
+        default=None,
+        help="which held-out subset to use (default: the next rotation recorded in the measurement cache)",
+    )
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="store the result as a selection measurement, keyed on this machine, model digest, harness version and suite",
+    )
     args = parser.parse_args(argv)
+    tasks_file = Path(args.tasks).resolve()
 
     if args.task:
         # Single-task mode: the parent gave this process an isolated environment.
-        tasks = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+        tasks = json.loads(tasks_file.read_text(encoding="utf-8"))
         task = next(t for t in tasks if t["id"] == args.task)
         row = run_one(task, model=args.model, base_url=args.base_url or "")
         if args.json_out:
@@ -717,24 +1156,37 @@ def main(argv: list[str] | None = None) -> int:
         names = load_env_file(Path(args.env_file))
         print(f"Read {len(names)} variable(s) from {args.env_file}: {', '.join(names) or 'none'}")
 
+    rotation = args.rotation
+    if rotation is None:
+        if args.record:
+            from core.model_measurement import next_rotation, suite_fingerprint
+
+            rotation = next_rotation(suite_fingerprint(json.loads(tasks_file.read_text(encoding="utf-8"))))
+        else:
+            rotation = 1
     models = [m.strip() for m in (args.models or args.model).split(",") if m.strip()]
     reports: list[dict[str, Any]] = []
     for model in models:
         if len(models) > 1:
             print(f"\n=== {model} ===")
         work = (Path(args.work) / model.replace("/", "_").replace(":", "-")) if args.work else None
-        reports.append(
-            run_bench(
-                model=model,
-                limit=args.limit,
-                budget_seconds=args.budget,
-                task_timeout=args.task_timeout,
-                work=work,
-                stop_on_rate_limit=not args.keep_running_after_429,
-                pace_seconds=args.pace,
-                throttle_retries=args.throttle_retries,
-            )
+        report = run_bench(
+            model=model,
+            limit=args.limit,
+            budget_seconds=args.budget,
+            task_timeout=args.task_timeout,
+            work=work,
+            stop_on_rate_limit=not args.keep_running_after_429,
+            pace_seconds=args.pace,
+            throttle_retries=args.throttle_retries,
+            tasks_file=tasks_file,
+            holdout=args.holdout,
+            rotation=rotation,
+            only=[item for item in (args.only or "").split(",") if item.strip()],
         )
+        reports.append(report)
+        if args.record:
+            _record(report, rotation=rotation)
 
     if len(reports) == 1:
         table = markdown(reports[0])
@@ -750,6 +1202,23 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.markdown).write_text(table + "\n", encoding="utf-8")
         print(f"Markdown table: {args.markdown}")
     return 0 if all(report["passed"] == report["ran"] for report in reports) else 1
+
+
+def _record(report: dict[str, Any], *, rotation: int) -> None:
+    """Store one report as the selection's evidence, and print where the decision now stands."""
+    from core.model_measurement import record, score_from_report
+
+    score = score_from_report(report, graded=report.get("graded_tasks") or None)
+    try:
+        record(score, rotation=rotation)
+    except ValueError as exc:
+        print(f"  NOT recorded: {exc}. A partial run must not replace a complete measurement.")
+        return
+    print(
+        f"  recorded {score.ref}: {score.total_passed}/{score.total_ran} graded "
+        f"({score.tool_rate:.0%}), usable={'yes' if score.usable else 'no'}, "
+        f"digest {score.digest[:12]}"
+    )
 
 
 if __name__ == "__main__":

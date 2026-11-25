@@ -111,11 +111,20 @@ class TurnMind:
                 enabled = True
             if not enabled:
                 return
+            weak_local = False
+            if local_model:
+                try:
+                    from .. import model_measurement
+
+                    weak_local = model_measurement.local_is_weak(local_model)
+                except Exception:  # noqa: BLE001 - no measurement is not weakness
+                    weak_local = False
             self.decision = decide_route(
                 self.text,
                 local_model=local_model,
                 hosted_models=hosted,
                 forced_tier=forced,
+                weak_local_tools=weak_local,
             )
             if self.decision.tier == TIER_FREE_HOSTED:
                 self._confirm_hosted_model()

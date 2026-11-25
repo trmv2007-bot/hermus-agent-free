@@ -1370,3 +1370,36 @@ installer uses (`~/hermus-agent-free`, `%USERPROFILE%\hermus-agent-free`) and bo
 spellings, and `hermus.cmd` gives Windows the launcher `bin/hermus` gives the rest.
 `tests/test_cli_help.py` holds all three: the launch pins loopback, a gated gateway
 opens a room that carries its token, and the root redirect keeps it.
+
+## The model it picks is the one that measured best on this machine
+
+Ranking by parameter count fixed the obvious case — a machine holding an 8B no
+longer answers with Mistral's smallest model — but size is a proxy, not a
+measurement. An 8B that cannot chain two tool calls and a 4B that can are the
+same size class on paper and opposite answers in practice.
+
+So model choice now reads a tool-use benchmark when this machine has one. The
+suite (`tests/eval/tool_tasks.json`) grades seven categories that actually
+separate a 1B from a 4B from an 8B: one tool call with exact arguments, a
+two-step chain, choosing the right tool among similar ones, recognising when
+*not* to call a tool, acting on a tool result, refusing a destructive or
+out-of-scope request, and holding a formatting constraint under a long prompt.
+Every task is graded on tool arguments and file bytes, never on the model's
+prose. The existing harness runs it unchanged in shape — one subprocess and one
+`HERMUS_HOME` per task — and reports pass rate, first-pass rate, repair rate,
+steps, wall time and tool calls per category.
+
+`core/model_measurement.py` stores those numbers keyed on this machine, the
+model's own digest, the harness version and the suite fingerprint, with a TTL.
+Change any of the four and the score stops counting: a tag re-pulled as different
+weights is a different model, and a stale measurement is a lie. Selection prefers
+the measured model, keeps an incumbent that already works until a challenger wins
+by two whole tasks, breaks a tie for the local model and then for the faster one,
+and when nothing clears the bar it says plainly that the model is weak at tool
+use and routes multi-step turns to the strongest reachable endpoint instead of
+pretending. A machine nobody has measured keeps the existing catalog ranking, and
+the decision says which of the two it used.
+
+A rotating quarter of each category is held out every run, so the graded set the
+choice is made on is not the set it was tuned to see, and the held-out tasks are
+reported separately as validation.

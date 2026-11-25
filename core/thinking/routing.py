@@ -70,6 +70,10 @@ FREE_HOSTED_KEY_ENV = {
 #: difficulty at which the local model's ceiling is no longer assumed sufficient
 ESCALATE_AT_DIFFICULTY = 3
 
+#: once a measurement says the local model cannot use tools, a request this
+#: difficult is multi-step enough to send to the strongest reachable endpoint
+WEAK_LOCAL_ESCALATE_DIFFICULTY = 2
+
 #: a hosted turn this cheap spent more capacity than the task needed
 OVERROUTE_MAX_STEPS = 2
 
@@ -165,6 +169,7 @@ def decide_route(
     hosted_models: list[str] | None = None,
     forced_tier: str | None = None,
     difficulty: int | None = None,
+    weak_local_tools: bool = False,
 ) -> RouteDecision:
     """Pick the tier for one turn. Pure, deterministic, zero-token.
 
@@ -173,12 +178,21 @@ def decide_route(
     that is unavailable is reported as such rather than silently overridden...
     except that a person who forced ``local`` gets local — the request is
     explicit, and honesty is served by saying why the ceiling is lower.
+
+    ``weak_local_tools`` is a *measured* fact from
+    :mod:`core.model_measurement`: this machine's local model failed the tool-use
+    benchmark. A multi-step request then goes to the strongest reachable hosted
+    endpoint instead of pretending the local model can chain tool calls. It is
+    False when nothing was measured, so an unmeasured machine behaves exactly as
+    before and a guess never moves traffic.
     """
     hosted = [ref for ref in (hosted_models or []) if tier_of(ref) == TIER_FREE_HOSTED]
     local_ok = tier_of(local_model) == TIER_LOCAL
     diff, signals = _difficulty_signals(text)
     if difficulty is not None:
         diff = max(1, min(5, int(difficulty)))
+    if weak_local_tools:
+        signals = signals + ["measured:local-weak-at-tools"]
 
     forced = str(forced_tier or "auto").strip().lower()
     forced = "" if forced in ("", "auto") else forced
@@ -218,6 +232,15 @@ def decide_route(
             TIER_UNAVAILABLE,
             "",
             "no local model is bound and no free-tier key is configured; the turn has nothing free to run on",
+        )
+
+    if weak_local_tools and local_ok and hosted and diff >= WEAK_LOCAL_ESCALATE_DIFFICULTY:
+        target = _hosted_target(local_model, hosted)
+        return _decide(
+            TIER_FREE_HOSTED,
+            target,
+            f"difficulty {diff} and this machine's local model measured weak at tool use, "
+            f"so the turn goes to the strongest reachable endpoint ({target}) instead of faking it locally",
         )
 
     if diff < ESCALATE_AT_DIFFICULTY:
@@ -300,14 +323,24 @@ def configured_hosted_refs() -> list[str]:
 
     Reads both the process environment and keys a person added through the UI
     (``core.multi_key``). Never returns a provider outside
-    :data:`FREE_HOSTED_PROVIDERS`, so a paid key cannot enter routing.
+    :data:`FREE_HOSTED_PROVIDERS`, so a paid key cannot enter routing. Where a
+    tool-use measurement exists for these models it orders them, because the
+    escalation target should be the endpoint that measured best, not the one
+    whose name sorts first in the catalog.
     """
     refs: list[str] = []
     for provider in FREE_HOSTED_PROVIDERS:
         if not _free_key_present(provider):
             continue
         refs.append(f"{provider}/{FREE_HOSTED_DEFAULT_MODELS[provider]}")
-    return refs
+    if len(refs) < 2:
+        return refs
+    try:
+        from .. import model_measurement
+
+        return model_measurement.order_refs(refs)
+    except Exception:  # noqa: BLE001 - a measurement must never break routing
+        return refs
 
 
 def _free_key_present(provider: str) -> bool:
