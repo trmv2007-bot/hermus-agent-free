@@ -28,9 +28,26 @@ ROOT = Path(__file__).resolve().parents[1]
 #: How long a cold gateway may take before the CLI stops promising and says so.
 READY_TIMEOUT_S = 180.0
 
+#: The companion launch listens on this machine only. `hermus gateway start` keeps
+#: binding every interface for the people who want webhooks or a LAN fleet, but a
+#: listener nobody asked for is not something the default command should open to the
+#: network, and it must not outlive the terminal without that being the safe case.
+LOOPBACK = "127.0.0.1"
+
 
 def room_url(port: int) -> str:
-    return f"http://127.0.0.1:{port}/"
+    return f"http://{LOOPBACK}:{port}/"
+
+
+def room_link(port: int) -> str:
+    """The address to open: the room, with the gateway token when one is configured.
+
+    ``/`` redirects to the room and keeps its query, so the token survives the hop;
+    naming the room directly is one hop fewer and the same result.
+    """
+    token = os.environ.get("HERMUS_GATEWAY_TOKEN") or ""
+    query = f"?token={token}" if token else ""
+    return f"http://{LOOPBACK}:{port}/companion{query}"
 
 
 def answering(port: int, timeout: float = 1.5) -> bool:
@@ -48,7 +65,16 @@ def answering(port: int, timeout: float = 1.5) -> bool:
 
 def spawn_gateway(port: int) -> subprocess.Popen:
     """Start the gateway on its own, so it outlives the terminal that asked."""
-    command = [sys.executable, str(ROOT / "hermus.py"), "gateway", "start", "--port", str(port)]
+    command = [
+        sys.executable,
+        str(ROOT / "hermus.py"),
+        "gateway",
+        "start",
+        "--port",
+        str(port),
+        "--host",
+        LOOPBACK,
+    ]
     kwargs: dict = {"cwd": str(ROOT), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -69,6 +95,7 @@ def wait_until_ready(port: int, timeout: float = READY_TIMEOUT_S) -> bool:
 def run(args, ctx: CLIContext) -> None:
     port = int(os.environ.get("HERMUS_GATEWAY_PORT") or config.gateway_port)
     url = room_url(port)
+    link = room_link(port)
 
     if answering(port):
         print(f"Hermus is already running at {url}")
@@ -80,8 +107,9 @@ def run(args, ctx: CLIContext) -> None:
             raise SystemExit(1)
         print(f"Hermus is running at {url}")
 
-    print("The room is open in your browser. Close this window whenever you like; Hermus keeps running.")
+    print(f"The room is open in your browser, listening on {LOOPBACK} only.")
+    print("Close this window whenever you like; Hermus keeps running.")
     try:
-        webbrowser.open(url)
+        webbrowser.open(link)
     except Exception:  # noqa: BLE001 - a headless machine has no browser to open
-        print(f"Open {url} yourself.")
+        print(f"Open {link} yourself.")

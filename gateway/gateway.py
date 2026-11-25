@@ -745,15 +745,18 @@ app.include_router(_self_router, dependencies=_gate_control)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
-async def root():
+async def root(request: Request):
     """The first screen: the welcome flow until setup is real, then the companion.
 
-    The Control Room keeps its own address (``/control``) and everything the
-    operator panels can do stays one quiet control away from the companion.
+    The developer console keeps its own address (``/control``) and everything it
+    can do stays one quiet control away from the companion.
     """
     from gateway.routes_onboarding import redirect_target
 
-    return RedirectResponse(url=redirect_target(), status_code=307)
+    # The token a browser carries on `/` has to survive the hop to the room, or a
+    # gateway with HERMUS_GATEWAY_TOKEN set opens a page that cannot answer.
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(url=redirect_target() + query, status_code=307)
 
 
 @app.get("/favicon.ico")
@@ -1503,12 +1506,21 @@ def setup(platform: str):
         logger.info(f"Platform {platform} setup - just set env token")
 
 
-def start(port: int = None):
+#: What the gateway binds when nothing says otherwise. The developer command keeps
+#: listening on every interface, because Telegram/Discord webhooks and a fleet on the
+#: LAN need it. The companion launch (`hermus` on its own) passes loopback explicitly:
+#: a listener a person did not ask for must not be reachable from the network.
+DEFAULT_GATEWAY_HOST = "0.0.0.0"
+
+
+def start(port: int = None, host: str = None):
     port = port or config.gateway_port
+    host = host or os.getenv("HERMUS_GATEWAY_HOST") or DEFAULT_GATEWAY_HOST
     logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
     logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
     logger.info("Channels: /channels/status, /channels/start, /telegram/send")
     logger.info("Tools/MCP/Embeddings: /tools, /mcp/servers, /mcp/connect, /embeddings/status|/ingest|/search")
+    logger.info(f"Listening on {host}:{port}")
     logger.info(f"Docs: http://localhost:{port}/docs")
     logger.info(f"Control room: http://localhost:{port}/control")
     logger.info(f"Computer control (API): http://localhost:{port}/computer/status")
@@ -1518,7 +1530,7 @@ def start(port: int = None):
         f"Telegram mode={getattr(config, 'telegram_mode', 'auto')} | auto_channels={getattr(config, 'auto_start_channels', True)}"
     )
     logger.info("Cross-platform continuity: Same user across Telegram/Discord/CLI shares memory via SQLite FTS5 + embeddings")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -1355,3 +1355,18 @@ under Developers, a bare `hermus` runs the start path, and a gateway that alread
 answers is opened without spawning a second one. `tests/browser/test_surfaces.py`
 extends the operator-vocabulary guard to "panels" and "probes" and applies it to the
 room's own index and to the Diagnostics disclosure, so the leak cannot come back.
+
+**Review of this change, after it landed.** Three findings, all measured on a live
+gateway. A bare `hermus` spawned `gateway start`, which binds `0.0.0.0`, so one word
+opened an unauthenticated listener to the network that outlived the terminal;
+`gateway start` now takes `--host` (or `HERMUS_GATEWAY_HOST`) and the companion
+launch pins `127.0.0.1`, while the deliberate developer command keeps its old
+default. With `HERMUS_GATEWAY_TOKEN` set, the room the launcher opened could not
+answer — `/stream/command` returns 401 without the token (measured) — so the
+launcher opens `/companion?token=…` and the root redirect keeps its query, which
+means `/?token=…` survives the hop to the room. And `hermus` was documented as if it
+were on `PATH`, which the installers never arrange: the docs now name the folder the
+installer uses (`~/hermus-agent-free`, `%USERPROFILE%\hermus-agent-free`) and both
+spellings, and `hermus.cmd` gives Windows the launcher `bin/hermus` gives the rest.
+`tests/test_cli_help.py` holds all three: the launch pins loopback, a gated gateway
+opens a room that carries its token, and the root redirect keeps it.

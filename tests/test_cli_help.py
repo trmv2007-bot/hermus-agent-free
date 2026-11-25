@@ -93,9 +93,54 @@ def test_a_running_gateway_is_opened_and_never_started_twice(ready_gateway, monk
     monkeypatch.setattr(start_cmd, "spawn_gateway", lambda port: pytest.fail(f"spawned a second gateway on {port}"))
     monkeypatch.setattr(start_cmd.webbrowser, "open", lambda url: opened.append(url))
     start_cmd.run(None, None)
-    assert opened == [f"http://127.0.0.1:{ready_gateway}/"]
+    assert opened == [f"http://127.0.0.1:{ready_gateway}/companion"]
     assert "already running" in capsys.readouterr().out
 
 
 def test_a_port_that_is_not_a_gateway_is_not_believed():
     assert start_cmd.answering(1, timeout=0.5) is False, "a closed port answered /readyz"
+
+
+# ---------------------------------------------------------------------------
+# What the start path must not do: open the network, or open a room it cannot answer
+# ---------------------------------------------------------------------------
+def test_the_companion_listens_on_this_machine_only(monkeypatch):
+    """`hermus gateway start` may bind every interface; `hermus` may not.
+
+    A terminal chat that starts listening on 0.0.0.0 would turn one word into an
+    unauthenticated control plane for the whole network, running after the window
+    is closed.
+    """
+    seen: list[list[str]] = []
+
+    class _Proc:
+        pid = 1
+
+    monkeypatch.setattr(start_cmd.subprocess, "Popen", lambda command, **kw: (seen.append(command), _Proc())[1])
+    start_cmd.spawn_gateway(8000)
+    command = seen[0]
+    assert "--host" in command, f"the companion launch does not pin its interface: {command}"
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+
+
+def test_a_gated_gateway_opens_a_room_that_can_answer(monkeypatch):
+    monkeypatch.setenv("HERMUS_GATEWAY_TOKEN", "s3cret")
+    link = start_cmd.room_link(8000)
+    assert link == "http://127.0.0.1:8000/companion?token=s3cret"
+    monkeypatch.delenv("HERMUS_GATEWAY_TOKEN")
+    assert start_cmd.room_link(8000) == "http://127.0.0.1:8000/companion"
+
+
+def test_the_token_survives_the_root_redirect(monkeypatch):
+    """`/?token=…` must reach the room with the token, not drop it on the hop."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from gateway.gateway import root
+
+    scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"token=s3cret", "headers": []}
+    response = asyncio.run(root(Request(scope)))
+    location = response.headers["location"]
+    assert location.startswith("/"), location
+    assert location.endswith("?token=s3cret"), f"the redirect dropped the token: {location}"
