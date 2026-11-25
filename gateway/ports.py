@@ -48,7 +48,13 @@ def _binds(host: str, port: int) -> bool:
         # Not an address this machine can bind, so it is not holding anything here;
         # uvicorn meets the bad host itself and says so in its own words.
         return True
-    with socket.socket(family, socket.SOCK_STREAM) as probe:
+    try:
+        probe = socket.socket(family, socket.SOCK_STREAM)
+    except OSError:
+        # A family this kernel cannot offer (IPv6 switched off) holds nothing here;
+        # uvicorn meets the unreachable host itself rather than a traceback from us.
+        return True
+    with probe:
         if os.name != "nt":
             # uvicorn sets this too; without it a socket in TIME_WAIT refuses a bind.
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -128,8 +134,6 @@ def _health_url(host: str, port: int) -> str:
 
 def live_gateway(port: int) -> dict | None:
     """The gateway's own liveness answer, or None when nothing answers on ``port``."""
-    if listener_pid(port) is None and not _accepts(port):
-        return None
     for host in _probe_hosts():
         try:
             with urllib.request.urlopen(_health_url(host, port), timeout=PROBE_TIMEOUT_S) as response:

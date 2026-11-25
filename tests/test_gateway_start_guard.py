@@ -263,6 +263,38 @@ def test_status_finds_a_gateway_bound_to_a_lan_address():
     assert str(os.getpid()) in line
 
 
+def test_status_finds_a_lan_gateway_when_the_owner_pid_cannot_be_named(monkeypatch):
+    """macOS refuses net_connections to a normal user; status must still find the gateway."""
+    address = _lan_ipv4()
+    if address is None:
+        pytest.skip("this machine has no non-loopback IPv4 address")
+    try:
+        server = _answering(address)
+    except OSError:
+        pytest.skip(f"cannot listen on {address} here")
+    monkeypatch.setattr(ports, "listener_pid", lambda port: None)
+    try:
+        running, line = ports.gateway_status(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert running is True, line
+
+
+def test_an_ipv6_host_is_deferred_when_the_kernel_has_no_ipv6(monkeypatch):
+    """A refused AF_INET6 socket must not become a traceback or a false 'in use'."""
+    real_socket = socket.socket
+
+    def only_ipv4(family=socket.AF_INET, *args, **kwargs):
+        if family == socket.AF_INET6:
+            raise OSError(10047, "Address family not supported by protocol")
+        return real_socket(family, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "socket", only_ipv4)
+    assert ports.port_in_use(_free_port(), "::1") is False
+
+
 def test_status_names_a_foreign_process_on_the_port(held_port):
     running, line = ports.gateway_status(held_port)
 
