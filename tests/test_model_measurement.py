@@ -647,3 +647,13 @@ def test_the_json_grader_requires_a_bare_object_with_typed_values(tmp_path):
     assert check({"response": '{"status": "ok", "count": 4}', "tool_results": []}, tmp_path, args)[0]
     assert not check({"response": 'Here you go: {"status": "ok", "count": 4}', "tool_results": []}, tmp_path, args)[0]
     assert not check({"response": '{"status": "ok", "count": "4"}', "tool_results": []}, tmp_path, args)[0]
+
+
+def test_the_tag_fetch_refuses_what_cannot_be_a_runtime():
+    assert measurement._is_fetchable("http://localhost:11434/api/tags")
+    assert measurement._is_fetchable("https://192.168.1.9:11434/api/tags"), "a LAN runtime is legitimate"
+    assert not measurement._is_fetchable("file:///etc/passwd")
+    assert not measurement._is_fetchable("ftp://localhost/api/tags")
+    assert not measurement._is_fetchable("http://169.254.169.254/latest/meta-data/")
+    assert not measurement._is_fetchable("http://metadata.google.internal/computeMetadata/v1/")
+    assert measurement._ollama_tags("file:///etc/passwd") == {}

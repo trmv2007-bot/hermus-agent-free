@@ -103,6 +103,13 @@ CACHE_NAME = "model_bench.json"
 
 _LOCAL_PROVIDERS = ("ollama", "lmstudio", "nollama")
 
+#: the only schemes and hosts this call will not fetch. The address is the
+#: person's own runtime, so an allow-list of hosts cannot exist — but a URL that
+#: is not HTTP(S), or that points at a cloud metadata endpoint, is never an
+#: Ollama runtime and is refused before a connection is opened.
+_ALLOWED_SCHEMES = ("http", "https")
+_BLOCKED_HOSTS = ("169.254.169.254", "metadata.google.internal", "fd00:ec2::254", "metadata")
+
 _tags_cache: tuple[float, dict[str, str]] = (0.0, {})
 
 
@@ -139,10 +146,13 @@ def _ollama_tags(base_url: str = "") -> dict[str, str]:
         return _tags_cache[1]
     url = (base_url or os.environ.get("HERMUS_OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/") + "/api/tags"
     tags: dict[str, str] = {}
+    if not _is_fetchable(url):
+        _tags_cache = (now, {})
+        return {}
     try:
         import urllib.request
 
-        with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 - fixed local URL
+        with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 - the scheme and host are checked above
             payload = json.loads(resp.read().decode("utf-8", "replace"))
         for entry in payload.get("models") or []:
             name = str(entry.get("name") or entry.get("model") or "")
@@ -152,6 +162,25 @@ def _ollama_tags(base_url: str = "") -> dict[str, str]:
         tags = {}
     _tags_cache = (now, tags)
     return tags
+
+
+def _is_fetchable(url: str) -> bool:
+    """HTTP(S) only, and never a cloud metadata endpoint.
+
+    This is the one place the measurement reads a URL, and the URL is whatever
+    the person configured as their model runtime. The scheme is allow-listed and
+    the metadata endpoints every SSRF payload targets are refused, so a URL that
+    cannot be an Ollama runtime is not opened even if something later makes the
+    setting reachable from outside the machine's owner.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(str(url or ""))
+    except ValueError:
+        return False
+    host = (parts.hostname or "").strip().lower()
+    return parts.scheme in _ALLOWED_SCHEMES and bool(host) and host not in _BLOCKED_HOSTS
 
 
 def model_digest(ref: str, *, tags: dict[str, str] | None = None) -> str:
