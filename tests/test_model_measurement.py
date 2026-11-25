@@ -692,6 +692,35 @@ def test_the_tag_guard_rewrites_nothing_and_allows_a_local_bind_address():
 
 def test_the_tag_fetch_does_not_follow_a_redirect():
     handler = measurement._NoRedirects()
+    assert issubclass(measurement._NoRedirects, __import__("urllib.request", fromlist=["x"]).HTTPRedirectHandler)
     assert handler.redirect_request(None, None, 302, "", {}, "http://169.254.169.254/") is None, (
         "the tag listing never redirects, so a 3xx must not become a second unvalidated fetch"
     )
+
+
+def test_the_tag_fetch_really_reads_a_running_runtime():
+    """The guard must not be the reason no digest exists: this fetches for real."""
+    import http.server
+    import threading
+
+    payload = json.dumps({"models": [{"name": "lfm2.5:8b", "digest": "abc123"}]}).encode()
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server's spelling
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            pass
+
+    measurement._tags_cache = (0.0, {})  # a previous test's empty cache would mask a broken fetch
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        tags = measurement._ollama_tags(f"http://127.0.0.1:{server.server_address[1]}")
+    finally:
+        server.shutdown()
+    assert tags == {"lfm2.5:8b": "abc123"}, "a real runtime's tag list must come back, or no measurement can validate"

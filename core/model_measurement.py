@@ -40,6 +40,7 @@ import json
 import os
 import socket
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -192,13 +193,14 @@ def _blocked_address(value: str) -> bool:
     return str(address) == "fd00:ec2::254"
 
 
-class _NoRedirects:
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
     """A redirect target is a second URL, and this call validates exactly one.
 
     The tag listing never redirects, so a 3xx is either a misconfigured runtime
     or an attempt to make the server fetch something the guard already refused.
     Returning ``None`` tells urllib not to follow it, which surfaces the 3xx as
-    the HTTP error it is.
+    the HTTP error it is. It must subclass the stock handler: ``build_opener``
+    wires handlers through ``add_parent``, and a bare object breaks every fetch.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -206,8 +208,6 @@ class _NoRedirects:
 
 
 def _open_tags(url: str, timeout: float):
-    import urllib.request
-
     return urllib.request.build_opener(_NoRedirects).open(url, timeout=timeout)
 
 
