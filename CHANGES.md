@@ -1397,5 +1397,6 @@ cp1252 stream — both a switchable wrapper and one that refuses a new encoding 
 holds the wiring that configures the console before anything can print.
 `tests/test_gateway_start_guard.py` drives the real CLI against real sockets: a held
 port refuses in under a second with the port and pid in the message, a loopback
-listener is seen from a wildcard start, `status` answers both running and stopped, and
-the listener count on the port never changes.
+listener is seen from a wildcard start (Windows will bind `0.0.0.0` beside it), an IPv6
+host is not mistaken for a busy one, `status` finds a gateway bound to a LAN address and
+survives a listener that is not HTTP, and the listener count on the port never changes.

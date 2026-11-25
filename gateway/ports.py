@@ -9,14 +9,15 @@ a collision is one printed line and a non-zero exit.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import socket
 import urllib.error
 import urllib.request
 
-#: How long a status probe waits for the gateway to answer before calling it absent.
-PROBE_TIMEOUT_S = 2.0
+#: How long a health probe waits for the gateway to answer before trying elsewhere.
+PROBE_TIMEOUT_S = 1.0
 
 #: How long a connect probe waits. Loopback answers or refuses at once.
 CONNECT_TIMEOUT_S = 0.5
@@ -24,24 +25,35 @@ CONNECT_TIMEOUT_S = 0.5
 #: The address a start binds when nothing names one, as `gateway start` resolves it.
 ANY_INTERFACE = "0.0.0.0"
 
+#: The addresses a probe asks, in order: this machine, whichever interface it bound.
+LOOPBACK = ("127.0.0.1", "::1")
+
 
 def _accepts(port: int) -> bool:
-    """True when something on loopback is accepting connections on ``port``."""
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=CONNECT_TIMEOUT_S):
-            return True
-    except OSError:
-        return False
+    """True when something on this machine is accepting connections on ``port``."""
+    for host in LOOPBACK:
+        try:
+            with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT_S):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _binds(host: str, port: int) -> bool:
     """Would a listener on ``host:port`` get its socket, with uvicorn's options?"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+    try:
+        family, _, _, _, sockaddr = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0]
+    except socket.gaierror:
+        # Not an address this machine can bind, so it is not holding anything here;
+        # uvicorn meets the bad host itself and says so in its own words.
+        return True
+    with socket.socket(family, socket.SOCK_STREAM) as probe:
         if os.name != "nt":
             # uvicorn sets this too; without it a socket in TIME_WAIT refuses a bind.
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            probe.bind((host, port))
+            probe.bind(sockaddr)
         except OSError:
             return False
     return True
@@ -62,7 +74,7 @@ def listener_pid(port: int) -> int | None:
     return None
 
 
-def port_in_use(port: int, host: str = "0.0.0.0") -> bool:
+def port_in_use(port: int, host: str = ANY_INTERFACE) -> bool:
     """Is something already serving or holding this port?
 
     Three questions, because one is not enough: a connect catches a gateway serving
@@ -89,14 +101,45 @@ def require_free(port: int, host: str | None = None) -> None:
     raise SystemExit(1)
 
 
+def _probe_hosts() -> list[str]:
+    """Loopback, then this machine's own interface addresses.
+
+    A gateway bound to a LAN address answers on that address and not on loopback, so
+    status must ask where it might actually be listening instead of assuming.
+    """
+    hosts = list(LOOPBACK)
+    try:
+        import psutil
+    except ImportError:
+        return hosts
+    try:
+        for addrs in psutil.net_if_addrs().values():
+            for addr in addrs:
+                if addr.family in (socket.AF_INET, socket.AF_INET6) and addr.address and "%" not in addr.address:
+                    hosts.append(addr.address)
+    except (OSError, psutil.Error):
+        pass
+    return list(dict.fromkeys(hosts))
+
+
+def _health_url(host: str, port: int) -> str:
+    return f"http://[{host}]:{port}/healthz" if ":" in host else f"http://{host}:{port}/healthz"
+
+
 def live_gateway(port: int) -> dict | None:
     """The gateway's own liveness answer, or None when nothing answers on ``port``."""
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=PROBE_TIMEOUT_S) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError):
+    if listener_pid(port) is None and not _accepts(port):
         return None
-    return body if isinstance(body, dict) and body.get("status") == "ok" else None
+    for host in _probe_hosts():
+        try:
+            with urllib.request.urlopen(_health_url(host, port), timeout=PROBE_TIMEOUT_S) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
+            # Not HTTP at all is still an answer: it is not this gateway.
+            continue
+        if isinstance(body, dict) and body.get("status") == "ok":
+            return body
+    return None
 
 
 def gateway_status(port: int) -> tuple[bool, str]:
@@ -106,7 +149,7 @@ def gateway_status(port: int) -> tuple[bool, str]:
         return True, f"Hermus gateway: running on port {port} (pid {health.get('pid', 'unknown')})"
     pid = listener_pid(port)
     if pid is not None:
-        return False, f"Hermus gateway: not running on port {port}; another process holds it (pid {pid})"
+        return False, f"Hermus gateway: not answering on port {port}; a listener holds it (pid {pid})"
     if port_in_use(port):
-        return False, f"Hermus gateway: not running on port {port}; the port is in use by a process we cannot name"
+        return False, f"Hermus gateway: not answering on port {port}; the port is in use by a process we cannot name"
     return False, f"Hermus gateway: not running on port {port}"

@@ -3,7 +3,7 @@
 The defect: with the port already bound, `hermus gateway start` reached uvicorn,
 failed to bind, and left a live process holding no listener — a launcher clicked
 twice, or a second start for a test, left a process nobody could see or account
-for. These tests hold a real socket and drive the real CLI, so the refusal is
+for. These tests hold real sockets and drive the real CLI, so the refusal is
 proven where a person meets it, and no test process is left running.
 """
 
@@ -38,12 +38,6 @@ def held_port():
         sock.close()
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 @pytest.fixture()
 def loopback_port():
     """A port held on loopback only, as the companion launch binds it."""
@@ -54,6 +48,87 @@ def loopback_port():
         yield sock.getsockname()[1]
     finally:
         sock.close()
+
+
+@pytest.fixture()
+def non_http_port():
+    """A port answering with a banner no HTTP parser accepts, like an SSH server."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(8)
+    sock.settimeout(0.5)
+    stop = threading.Event()
+
+    def serve():
+        while not stop.is_set():
+            try:
+                conn, _ = sock.accept()
+            except (TimeoutError, OSError):
+                continue
+            try:
+                conn.sendall(b"SSH-2.0-not-a-gateway\r\n")
+            except OSError:
+                pass
+            finally:
+                conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield sock.getsockname()[1]
+    finally:
+        stop.set()
+        sock.close()
+        thread.join(5)
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _lan_ipv4() -> str | None:
+    """This machine's first non-loopback IPv4 address, if it has one."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    for addrs in psutil.net_if_addrs().values():
+        for addr in addrs:
+            if addr.family == socket.AF_INET and addr.address and not addr.address.startswith("127."):
+                return addr.address
+    return None
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+        body = json.dumps({"success": True, "status": "ok", "pid": os.getpid()}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def _answering(host: str) -> HTTPServer:
+    """A server answering /healthz the way the gateway does."""
+    server = HTTPServer((host, 0), _HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.fixture()
+def answering_gateway():
+    server = _answering("127.0.0.1")
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def _cli(*args: str, home: Path, timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -97,6 +172,26 @@ def test_a_free_port_reads_as_free():
     assert ports.port_in_use(_free_port()) is False
 
 
+def test_a_free_ipv6_host_reads_as_free():
+    """An IPv6 bind address is not an address-in-use; the probe must not say it is."""
+    assert ports.port_in_use(_free_port(), "::1") is False
+
+
+def test_a_loopback_ipv6_listener_is_seen():
+    if not socket.has_ipv6:
+        pytest.skip("this machine has no IPv6")
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        sock.bind(("::1", 0))
+    except OSError:
+        pytest.skip("this machine has no IPv6 loopback")
+    sock.listen(8)
+    try:
+        assert ports.port_in_use(sock.getsockname()[1]) is True
+    finally:
+        sock.close()
+
+
 def test_require_free_refuses_in_one_line(capsys, held_port):
     with pytest.raises(SystemExit) as refused:
         ports.require_free(held_port)
@@ -138,33 +233,6 @@ def test_status_reports_a_stopped_gateway(tmp_path, capsys):
     assert f"not running on port {port}" in done.stdout
 
 
-@pytest.fixture()
-def answering_gateway():
-    """A loopback server answering /healthz the way the gateway does."""
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
-            body = json.dumps({"success": True, "status": "ok", "pid": os.getpid()}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    server = HTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_address[1]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(5)
-
-
 def test_status_reports_a_running_gateway(tmp_path, answering_gateway):
     running, line = ports.gateway_status(answering_gateway)
     assert running is True
@@ -176,9 +244,40 @@ def test_status_reports_a_running_gateway(tmp_path, answering_gateway):
     assert str(os.getpid()) in done.stdout
 
 
-def test_status_names_a_foreign_process_on_the_port(held_port, capsys):
+def test_status_finds_a_gateway_bound_to_a_lan_address():
+    """A gateway on a LAN interface answers there and not on loopback; status must find it."""
+    address = _lan_ipv4()
+    if address is None:
+        pytest.skip("this machine has no non-loopback IPv4 address")
+    try:
+        server = _answering(address)
+    except OSError:
+        pytest.skip(f"cannot listen on {address} here")
+    try:
+        running, line = ports.gateway_status(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert running is True, line
+    assert str(os.getpid()) in line
+
+
+def test_status_names_a_foreign_process_on_the_port(held_port):
     running, line = ports.gateway_status(held_port)
 
     assert running is False
-    assert "another process holds it" in line
+    assert f"not answering on port {held_port}" in line
     assert str(os.getpid()) in line
+
+
+def test_status_survives_a_listener_that_is_not_http(tmp_path, non_http_port):
+    running, line = ports.gateway_status(non_http_port)
+
+    assert running is False
+    assert f"not answering on port {non_http_port}" in line
+
+    done = _cli("gateway", "status", "--port", str(non_http_port), home=tmp_path)
+    assert done.returncode == 1
+    assert "Traceback" not in done.stderr
+    assert f"port {non_http_port}" in done.stdout
