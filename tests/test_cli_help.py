@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import http.server
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -93,7 +94,7 @@ def test_a_running_gateway_is_opened_and_never_started_twice(ready_gateway, monk
     monkeypatch.setattr(start_cmd, "spawn_gateway", lambda port: pytest.fail(f"spawned a second gateway on {port}"))
     monkeypatch.setattr(start_cmd.webbrowser, "open", lambda url: opened.append(url))
     start_cmd.run(None, None)
-    assert opened == [f"http://127.0.0.1:{ready_gateway}/companion"]
+    assert opened == [f"http://127.0.0.1:{ready_gateway}/"]
     assert "already running" in capsys.readouterr().out
 
 
@@ -124,11 +125,21 @@ def test_the_companion_listens_on_this_machine_only(monkeypatch):
 
 
 def test_a_gated_gateway_opens_a_room_that_can_answer(monkeypatch):
+    """The root, not the room: it is what sends a fresh install to the welcome flow."""
     monkeypatch.setenv("HERMUS_GATEWAY_TOKEN", "s3cret")
-    link = start_cmd.room_link(8000)
-    assert link == "http://127.0.0.1:8000/companion?token=s3cret"
+    assert start_cmd.room_link(8000) == "http://127.0.0.1:8000/?token=s3cret"
     monkeypatch.delenv("HERMUS_GATEWAY_TOKEN")
-    assert start_cmd.room_link(8000) == "http://127.0.0.1:8000/companion"
+    assert start_cmd.room_link(8000) == "http://127.0.0.1:8000/"
+
+
+def test_a_token_with_url_syntax_survives_the_link(monkeypatch):
+    """`+`, `&` and `#` in a key must not be read as a space, a separator or a fragment."""
+    from urllib.parse import parse_qs, urlsplit
+
+    monkeypatch.setenv("HERMUS_GATEWAY_TOKEN", "abc+def&ghi#jkl")
+    link = start_cmd.room_link(8000)
+    assert "#" not in link.split("?", 1)[1], f"the token opened a fragment: {link}"
+    assert parse_qs(urlsplit(link).query)["token"] == ["abc+def&ghi#jkl"]
 
 
 def test_the_token_survives_the_root_redirect(monkeypatch):
@@ -144,3 +155,19 @@ def test_the_token_survives_the_root_redirect(monkeypatch):
     location = response.headers["location"]
     assert location.startswith("/"), location
     assert location.endswith("?token=s3cret"), f"the redirect dropped the token: {location}"
+
+
+def test_both_launchers_install_before_they_run_anything():
+    """`hermus` on a fresh checkout must set up first, on either platform.
+
+    The Windows wrapper shipped without that branch: on a clean Python the CLI
+    import fails on pydantic and the room never opens, so the install has to
+    happen in the launcher, before any dependency is imported.
+    """
+    root = Path(__file__).resolve().parents[1]
+    posix = (root / "bin" / "hermus").read_text(encoding="utf-8")
+    windows = (root / "hermus.cmd").read_text(encoding="utf-8")
+    assert "bootstrap_live.py" in posix and "bootstrap_live.py" in windows, "a launcher lost its visible setup path"
+    assert '$#" -eq 0' in posix, "the POSIX launcher no longer special-cases a bare `hermus`"
+    assert 'if not exist "%PY%"' in windows, "the Windows launcher no longer installs when the runtime is missing"
+    assert "setup.ps1" in windows, "the Windows launcher installs nothing"
