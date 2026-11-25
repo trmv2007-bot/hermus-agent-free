@@ -41,6 +41,50 @@ DEFAULT_PROFILE = "ask"
 
 STEPS = ("brain", "permissions", "name")
 
+# What a stored record's decisions mean, once resolved. A profile is a name for a
+# policy; the policy is what the tool path actually enforces, so it is the thing
+# worth keeping on disk.
+POLICY_VERSION = 1
+_STRICTNESS = {"deny": 3, "ask": 2, "allow": 1}
+
+
+class ProfileError(ValueError):
+    """A profile the product cannot honour. Raised before anything is written."""
+
+
+def resolve_profile(profile: Any, *, source: str = "an unnamed caller") -> str:
+    """The known profile this names, or a refusal that says who sent it.
+
+    Every writer of a permission choice goes through here: an unrecognised value
+    is refused with its origin named, never quietly replaced by "ask".
+    """
+    key = str(profile or "").strip()
+    if key in PROFILES:
+        return key
+    supported = ", ".join(PROFILES)
+    raise ProfileError(
+        f"unknown profile {key or 'an empty value'!r} from {source}: this build honours {supported}; nothing was written"
+    )
+
+
+def _profile_from_decisions(decisions: Any) -> str:
+    """The profile a stored decision set resolves to, or "" when it resolves to none.
+
+    Exact match first. Failing that, the narrowest profile the record is still no
+    wider than — a hand-edited tool can only ever make a label more conservative,
+    never more permissive.
+    """
+    if not isinstance(decisions, dict) or not decisions:
+        return ""
+    for key in PROFILES:
+        if decisions_for(key) == decisions:
+            return key
+    for key in PROFILES:
+        wanted = decisions_for(key)
+        if all(_STRICTNESS.get(str(decisions.get(tool, want)), 0) >= _STRICTNESS.get(want, 0) for tool, want in wanted.items()):
+            return key
+    return ""
+
 
 def _same_path(left: Path, right: Path) -> bool:
     try:
@@ -85,12 +129,29 @@ def fresh_state() -> dict[str, Any]:
         "version": STATE_VERSION,
         "name": DEFAULT_NAME,
         "permissions": DEFAULT_PROFILE,
+        "permissions_policy": None,
         "brain": None,
         "check": {"ok": False, "reason": "no model has answered yet", "at": None, "model": None},
         "upgrade": None,
         "upgrade_history": [],
         "completed_at": None,
     }
+
+
+def _recorded_profile(raw: dict[str, Any]) -> str:
+    """The profile a stored record resolves to: its label, else the policy beside it.
+
+    An install written before the policy was kept has only a label; an install
+    whose label has since been renamed or removed is read back through the
+    decisions it was written with, so the meaning survives the renaming.
+    """
+    label = str(raw.get("permissions") or "").strip()
+    if label in PROFILES:
+        return label
+    policy = raw.get("permissions_policy")
+    if isinstance(policy, dict):
+        return _profile_from_decisions(policy.get("decisions"))
+    return ""
 
 
 def load() -> dict[str, Any]:
@@ -104,6 +165,9 @@ def load() -> dict[str, Any]:
         for key in state:
             if key in raw:
                 state[key] = raw[key]
+        resolved = _recorded_profile(raw)
+        if resolved:
+            state["permissions"] = resolved
     return state
 
 
@@ -126,7 +190,7 @@ def incomplete_reason(state: dict[str, Any]) -> str:
     check = state.get("check") or {}
     if not check.get("ok"):
         return str(check.get("reason") or "the chosen model has not answered yet")
-    if state.get("permissions") not in PROFILES:
+    if not _recorded_profile(state):
         return "no permission choice recorded"
     if not str(state.get("name") or "").strip():
         return "no name recorded"
@@ -248,11 +312,12 @@ def decisions_for(profile: str) -> dict[str, str]:
 
     Uses the risk and capability already declared for every tool, so the three
     choices are the same decisions the approval prompt would have asked for —
-    not a parallel permission system.
+    not a parallel permission system. An unknown profile is refused rather than
+    mapped to the permissive default.
     """
     from .permissions import DEFAULT_POLICY, Capability, Decision, Risk
 
-    profile = profile if profile in PROFILES else DEFAULT_PROFILE
+    profile = resolve_profile(profile, source="decisions_for")
     out: dict[str, str] = {}
     for tool, entry in DEFAULT_POLICY.items():
         risk = entry[0]
@@ -270,27 +335,46 @@ def decisions_for(profile: str) -> dict[str, str]:
     return out
 
 
-def apply_profile(profile: str) -> dict[str, Any]:
+def apply_profile(profile: str, *, source: str = "an unnamed caller") -> dict[str, Any]:
     """Write the profile into the tool policy overrides, reversibly.
 
     Only the non-read tools the profile speaks about are touched; a decision the
     person later changes by hand in Approvals still wins, because that is the
-    same file.
+    same file. What is recorded is the resolved policy, not just its name: a
+    profile renamed or removed in a later build cannot change or widen what this
+    install already agreed to.
     """
     from .permissions import permission_manager
 
-    decisions = decisions_for(profile)
+    key = resolve_profile(profile, source=source)
+    decisions = decisions_for(key)
     tools = permission_manager.overrides.setdefault("tools", {})
     for tool, decision in decisions.items():
         tools[tool] = decision
-    permission_manager.overrides["profile"] = profile if profile in PROFILES else DEFAULT_PROFILE
-    permission_manager.overrides["profile_applied_at"] = _now()
+    policy = {"version": POLICY_VERSION, "profile": key, "decisions": decisions, "applied_at": _now()}
+    permission_manager.overrides["profile"] = key
+    permission_manager.overrides["profile_policy"] = policy
     permission_manager._save_overrides()
-    return {"profile": profile, "tools": len(decisions)}
+    return {"profile": key, "tools": len(decisions), "policy": policy}
 
 
 def current_profile() -> str:
+    """The profile in force, resolved from the policy that is enforced.
+
+    The label is only a name. A record whose label has been renamed away still
+    resolves to the decisions it was written with, so reading an old install can
+    never widen what it is allowed to do.
+    """
     from .permissions import permission_manager
 
-    profile = permission_manager.overrides.get("profile")
-    return profile if profile in PROFILES else DEFAULT_PROFILE
+    overrides = permission_manager.overrides
+    stored = overrides.get("profile_policy")
+    if isinstance(stored, dict):
+        resolved = _profile_from_decisions(stored.get("decisions"))
+        if resolved:
+            return resolved
+    resolved = _profile_from_decisions(overrides.get("tools"))
+    if resolved:
+        return resolved
+    label = overrides.get("profile")
+    return label if label in PROFILES else DEFAULT_PROFILE
