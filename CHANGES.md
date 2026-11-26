@@ -1371,6 +1371,38 @@ spellings, and `hermus.cmd` gives Windows the launcher `bin/hermus` gives the re
 `tests/test_cli_help.py` holds all three: the launch pins loopback, a gated gateway
 opens a room that carries its token, and the root redirect keeps it.
 
+## The model it picks is the one that measured best on this machine
+
+Ranking by parameter count fixed the obvious case — a machine holding an 8B no
+longer answers with Mistral's smallest model — but size is a proxy, not a
+measurement. An 8B that cannot chain two tool calls and a 4B that can are the
+same size class on paper and opposite answers in practice.
+
+So model choice now reads a tool-use benchmark when this machine has one. The
+suite (`tests/eval/tool_tasks.json`) grades seven categories that actually
+separate a 1B from a 4B from an 8B: one tool call with exact arguments, a
+two-step chain, choosing the right tool among similar ones, recognising when
+*not* to call a tool, acting on a tool result, refusing a destructive or
+out-of-scope request, and holding a formatting constraint under a long prompt.
+Every task is graded on tool arguments and file bytes, never on the model's
+prose. The existing harness runs it unchanged in shape — one subprocess and one
+`HERMUS_HOME` per task — and reports pass rate, first-pass rate, repair rate,
+steps, wall time and tool calls per category.
+
+`core/model_measurement.py` stores those numbers keyed on this machine, the
+model's own digest, the harness version and the suite fingerprint, with a TTL.
+Change any of the four and the score stops counting: a tag re-pulled as different
+weights is a different model, and a stale measurement is a lie. Selection prefers
+the measured model, keeps an incumbent that already works until a challenger wins
+by two whole tasks, breaks a tie for the local model and then for the faster one,
+and when nothing clears the bar it says plainly that the model is weak at tool
+use and routes multi-step turns to the strongest reachable endpoint instead of
+pretending. A machine nobody has measured keeps the existing catalog ranking, and
+the decision says which of the two it used.
+
+A rotating quarter of each category is held out every run, so the graded set the
+choice is made on is not the set it was tuned to see, and the held-out tasks are
+reported separately as validation.
 ## A clean install ends clean, and a second start says so
 
 **The installer's last line is not a traceback.** `setup.cmd` pipes bootstrap through
@@ -1397,6 +1429,9 @@ cp1252 stream — both a switchable wrapper and one that refuses a new encoding 
 holds the wiring that configures the console before anything can print.
 `tests/test_gateway_start_guard.py` drives the real CLI against real sockets: a held
 port refuses in under a second with the port and pid in the message, a loopback
-listener is seen from a wildcard start (Windows will bind `0.0.0.0` beside it), an IPv6
-host is not mistaken for a busy one, `status` finds a gateway bound to a LAN address and
-survives a listener that is not HTTP, and the listener count on the port never changes.
+listener is seen from a wildcard start (Windows will bind `0.0.0.0` beside it), a
+listener bound only to a LAN address is found without psutil's process table, an IPv6
+host is probed in its own address family and an address this machine cannot offer is
+refused in its own words rather than read as free, `status` finds a LAN-bound gateway
+and survives a listener that is not HTTP, and the listener count on the port never
+changes.

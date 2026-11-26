@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from . import free_tier, key_sources, model_health
+from . import free_tier, key_sources, model_health, model_measurement
 from . import model_catalog as catalog
 from .providers import get_provider
 
@@ -433,13 +433,39 @@ def _local_absence(st: dict[str, Any]) -> str:
     return "no local runtime is installed on this machine"
 
 
-def _local_rung(st: dict[str, Any], *, need_tools: bool, steps: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Rung 1: a model on this machine, strongest pulled first."""
+def _measured_pick(refs: list[str], *, need_tools: bool, recorded: str = "") -> tuple[catalog.Pick, dict[str, Any]]:
+    """The strongest of these by measurement, or by the catalog when nothing was measured.
+
+    The model already recorded for this person is the incumbent: a challenger has
+    to beat it by more than noise before this moves them onto it. The incumbent is
+    passed in by whoever resolved it — onboarding's own record at startup, or the
+    role-preference store otherwise — because those are two different places and
+    reading only the second one would apply the margin to nobody. A reference that
+    is not in ``refs`` is not a candidate, so it cannot hold the choice hostage.
+    """
+    incumbent = str(recorded or "")
+    if not incumbent:
+        try:
+            from .models.model_preferences import model_preferences
+
+            incumbent = str(model_preferences.get("default") or "")
+        except Exception:  # noqa: BLE001 - no store is no incumbent
+            incumbent = ""
+    if incumbent and incumbent not in refs:
+        incumbent = ""
+    picked, decision = model_measurement.pick(refs, need_tools=need_tools, incumbent=incumbent)
+    return picked, decision.to_dict()
+
+
+def _local_rung(
+    st: dict[str, Any], *, need_tools: bool, steps: list[dict[str, Any]], recorded: str = ""
+) -> dict[str, Any] | None:
+    """Rung 1: a model on this machine, the one that measured best first."""
     refs = _local_refs(st)
     if not refs:
         steps.append(_step("local", "skipped", why=_local_absence(st)))
         return None
-    picked = catalog.best_of(refs, need_tools=need_tools)
+    picked, decision = _measured_pick(refs, need_tools=need_tools, recorded=recorded)
     for entry, why in picked.skipped:
         steps.append(_step("local", "skipped", ref=entry.ref, provider=catalog.provider_of(entry.ref), why=why))
     entry = picked.choice
@@ -459,12 +485,17 @@ def _local_rung(st: dict[str, Any], *, need_tools: bool, steps: list[dict[str, A
         else:
             steps.append(_step("local", "skipped", why="nothing pulled on this machine can call tools"))
         return None
-    reason = catalog.comparison_reason(entry, list(picked.runners))
-    if picked.note:
-        reason = f"{reason}; {picked.note}"
+    if decision.get("basis") == "measured":
+        reason = str(decision.get("reason") or "")
+    else:
+        reason = catalog.comparison_reason(entry, list(picked.runners))
+        if picked.note:
+            reason = f"{reason}; {picked.note}"
     brain = local_brain(entry.name, local_origin(entry.provider, st), provider=entry.provider, reason=reason)
     brain["source"] = f"{brain['source']}; {catalog.short_reason(entry, list(picked.runners))}"
     brain["evidence"] = MEASURED_LOCAL
+    brain["measurement"] = decision
+    brain["weak_at_tools"] = bool(decision.get("weak_at_tools"))
     steps.append(
         _step(
             "local",
@@ -504,23 +535,30 @@ def _keyless_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> dict[str,
     return None
 
 
-def _keyed_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def _keyed_rung(
+    *, need_tools: bool, steps: list[dict[str, Any]], recorded: str = ""
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Rung 3: a free plan the person pasted a key for, probed per candidate."""
     hosted, refused = _hosted_refs(need_tools=need_tools)
     if not hosted:
         missing = ", ".join(env for _provider, env, _url in _FREE_KEYS)
         steps.append(_step("keyed", "skipped", why=f"no free-tier key is configured anywhere this app reads keys ({missing})"))
         return None, refused
-    picked = catalog.best_of(hosted, need_tools=need_tools)
+    picked, decision = _measured_pick(hosted, need_tools=need_tools, recorded=recorded)
     entry = picked.choice
     if entry is None:
         steps.append(_step("keyed", "skipped", why="no keyed model answered when it was tried"))
         return None, refused
-    reason = catalog.comparison_reason(entry, list(picked.runners))
-    if picked.note:
-        reason = f"{reason}; {picked.note}"
+    if decision.get("basis") == "measured":
+        reason = str(decision.get("reason") or "")
+    else:
+        reason = catalog.comparison_reason(entry, list(picked.runners))
+        if picked.note:
+            reason = f"{reason}; {picked.note}"
     brain = free_brain(entry.provider, entry.name, catalog.FREE_KEYS[entry.provider], reason=reason)
     brain["source"] = f"{brain['source']}; {catalog.short_reason(entry, list(picked.runners))}"
+    brain["measurement"] = decision
+    brain["weak_at_tools"] = bool(decision.get("weak_at_tools"))
     steps.append(_step("keyed", "chose", ref=entry.ref, provider=entry.provider, why=reason))
     for skipped_entry, why in picked.skipped:
         steps.append(_step("keyed", "skipped", ref=skipped_entry.ref, provider=entry.provider, why=why))
@@ -528,7 +566,11 @@ def _keyed_rung(*, need_tools: bool, steps: list[dict[str, Any]]) -> tuple[dict[
 
 
 def resolve_brain(
-    preferred: str | None = None, *, status: dict[str, Any] | None = None, need_tools: bool = True
+    preferred: str | None = None,
+    *,
+    status: dict[str, Any] | None = None,
+    need_tools: bool = True,
+    incumbent: str | None = None,
 ) -> dict[str, Any]:
     """Resolve once down the ladder: local, keyless, keyed, then the honest stub.
 
@@ -559,11 +601,11 @@ def resolve_brain(
     steps: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
 
-    brain = _local_rung(st, need_tools=need_tools, steps=steps)
+    brain = _local_rung(st, need_tools=need_tools, steps=steps, recorded=str(incumbent or ""))
     if brain is None:
         brain = _keyless_rung(need_tools=need_tools, steps=steps)
     if brain is None:
-        brain, refused = _keyed_rung(need_tools=need_tools, steps=steps)
+        brain, refused = _keyed_rung(need_tools=need_tools, steps=steps, recorded=str(incumbent or ""))
     if brain is None:
         fell_through = "; ".join(f"{step['rung']}: {step['why']}" for step in steps if step["why"]) or "nothing was reachable"
         brain = stub_brain(f"no local model and no free-tier key ({fell_through})")
@@ -631,7 +673,7 @@ def upgrade_offer(
     and explains; :func:`apply_resolved_default` performs the change at startup.
     """
     st = status or local_status()
-    best = resolve_brain(status=st, need_tools=need_tools)
+    best = resolve_brain(status=st, need_tools=need_tools, incumbent=recorded)
     if best["kind"] == "stub":
         return {
             "needed": False,
@@ -655,6 +697,12 @@ def upgrade_offer(
     new = catalog.describe(best["model"])
     gone = _recorded_gone(recorded, st)
     weaker = catalog.strength(new) > catalog.strength(old)
+    # A measured choice is evidence where the ranking is a proxy: if this machine
+    # has tool-use numbers and they picked another model, the recorded model
+    # gives way even when it is larger. The measurement's own margin rule has
+    # already kept a recorded model that still works.
+    decided = best.get("measurement") or {}
+    measured = decided.get("basis") == "measured" and bool(best["model"]) and best["model"] != recorded
     # A recorded hosted model gives way to a model on this machine even when the
     # hosted one is larger: the ladder puts local first for reasons the ranking
     # does not price — nothing leaves the machine, and there is no allowance to
@@ -663,13 +711,15 @@ def upgrade_offer(
     nearer = catalog.TIERS.index(new_tier) < catalog.TIERS.index(old_tier)
     if gone:
         reason = f"{recorded} cannot answer any more ({gone}); {best['model']} is the strongest reachable"
+    elif measured:
+        reason = f"measured on this machine, {decided.get('reason') or best['model'] + ' is the better tool-caller'}"
     elif nearer:
         reason = f"{recorded} answers on {old_tier} and {best['model']} answers on {new_tier}, which the ladder puts first"
     elif weaker:
         reason = catalog.upgrade_reason(old, new, gone=gone)
     else:
         reason = f"{recorded} is still at least as strong as {best['model']}, so it stays"
-    move = bool(gone or weaker or nearer)
+    move = bool(gone or weaker or nearer or measured)
     return {
         "needed": move,
         "from": recorded,

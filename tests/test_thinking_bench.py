@@ -51,8 +51,13 @@ def test_prose_alone_never_passes_a_file_task(tmp_path):
 
 
 def test_the_shell_check_reads_tool_stdout_not_claims(tmp_path):
+    # The name was right and the assertion was wrong: a token the model repeats
+    # in prose is a claim, not output, and counting it let a model that never
+    # called a tool score a tool-use task.
     claimed = {"response": "HERMUS-BENCH-OK", "tool_results": []}
-    assert bench.check_tool_stdout_contains(claimed, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is True
+    assert bench.check_tool_stdout_contains(claimed, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is False
+    real = {"response": "", "tool_results": [{"tool": "shell_execute", "result": {"stdout": "HERMUS-BENCH-OK"}}]}
+    assert bench.check_tool_stdout_contains(real, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is True
     silent = {"response": "done", "tool_results": [{"tool": "shell_execute", "result": {"stdout": "oops"}}]}
     assert bench.check_tool_stdout_contains(silent, tmp_path, {"value": "HERMUS-BENCH-OK"})[0] is False
 
@@ -207,3 +212,22 @@ def test_a_passed_task_does_not_stop_the_run_but_a_throttled_failure_does():
     assert bench._stops_run({"rate_limited": True, "passed": True}) is False
     assert bench._stops_run({"rate_limited": True, "passed": False}) is True
     assert bench._stops_run({"rate_limited": False, "passed": False}) is False
+
+
+def test_the_header_keeps_the_graded_qualifier_when_tasks_were_held_out():
+    report = {
+        "model": "ollama/lfm2.5:8b",
+        "model_ran": ["ollama/lfm2.5:8b"],
+        "passed": 10,
+        "ran": 22,
+        "holdout": True,
+        "holdout_block": {"passed": 5, "ran": 7},
+        "rotation": 1,
+        "rows": [],
+        "failures": [],
+    }
+    header = bench.markdown(report)
+    assert "Graded tasks passed **10/22**" in header, "a held-out run must not read as whole-suite coverage"
+    assert "Held-out tasks" in header
+    plain = dict(report, holdout=False, holdout_block={})
+    assert "Tasks passed **10/22**" in bench.markdown(plain)

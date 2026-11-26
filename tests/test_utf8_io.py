@@ -41,6 +41,9 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("core/mission.py", "MissionFileScope.open"): "classmethod building a scope, not a stream",
     # Not a stream either: this hands a URL to the platform's browser launcher.
     ("hermus_cli/start.py", "webbrowser.open"): "launches the browser with a URL; no text is read or written",
+    # An HTTP request, not a filesystem open: the opener returns a response whose body
+    # is decoded by the caller (core/model_measurement.py, landed on main with #105).
+    ("core/model_measurement.py", "urllib.request.build_opener.open"): "HTTP GET through an opener; no file is read",
 }
 
 

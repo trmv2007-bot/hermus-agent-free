@@ -88,16 +88,38 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def _lan_ipv4() -> str | None:
-    """This machine's first non-loopback IPv4 address, if it has one."""
+def _lan_ipv4s() -> list[str]:
+    """This machine's non-loopback IPv4 addresses, routable ones before link-local.
+
+    A disconnected adapter keeps a 169.254.x.x address that nothing can bind, so the
+    order matters: the routable address of a real interface is what a gateway on the
+    LAN would actually use.
+    """
     try:
         import psutil
     except ImportError:
-        return None
+        return []
+    routable: list[str] = []
+    link_local: list[str] = []
     for addrs in psutil.net_if_addrs().values():
         for addr in addrs:
-            if addr.family == socket.AF_INET and addr.address and not addr.address.startswith("127."):
-                return addr.address
+            if addr.family != socket.AF_INET or not addr.address or addr.address.startswith("127."):
+                continue
+            (link_local if addr.address.startswith("169.254.") else routable).append(addr.address)
+    return routable + link_local
+
+
+def _listen_on_lan():
+    """A listening socket on a LAN address, or None when this machine has none."""
+    for address in _lan_ipv4s():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind((address, 0))
+        except OSError:
+            sock.close()
+            continue
+        sock.listen(8)
+        return sock, address
     return None
 
 
@@ -119,6 +141,16 @@ def _answering(host: str) -> HTTPServer:
     server = HTTPServer((host, 0), _HealthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
+
+
+def _answering_on_lan() -> HTTPServer | None:
+    """The same server bound to a LAN address, or None when this machine has none."""
+    for address in _lan_ipv4s():
+        try:
+            return _answering(address)
+        except OSError:
+            continue
+    return None
 
 
 @pytest.fixture()
@@ -246,13 +278,9 @@ def test_status_reports_a_running_gateway(tmp_path, answering_gateway):
 
 def test_status_finds_a_gateway_bound_to_a_lan_address():
     """A gateway on a LAN interface answers there and not on loopback; status must find it."""
-    address = _lan_ipv4()
-    if address is None:
-        pytest.skip("this machine has no non-loopback IPv4 address")
-    try:
-        server = _answering(address)
-    except OSError:
-        pytest.skip(f"cannot listen on {address} here")
+    server = _answering_on_lan()
+    if server is None:
+        pytest.skip("this machine has no bindable non-loopback IPv4 address")
     try:
         running, line = ports.gateway_status(server.server_address[1])
     finally:
@@ -265,15 +293,10 @@ def test_status_finds_a_gateway_bound_to_a_lan_address():
 
 def test_a_lan_only_listener_reads_as_taken_without_the_process_table(monkeypatch):
     """A gateway bound only to 192.168.x.x must still be seen: loopback never answers it."""
-    address = _lan_ipv4()
-    if address is None:
-        pytest.skip("this machine has no non-loopback IPv4 address")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.bind((address, 0))
-    except OSError:
-        pytest.skip(f"cannot listen on {address} here")
-    sock.listen(8)
+    held = _listen_on_lan()
+    if held is None:
+        pytest.skip("this machine has no bindable non-loopback IPv4 address")
+    sock, _ = held
     monkeypatch.setattr(ports, "listener_pid", lambda port: None)
     try:
         assert ports.port_in_use(sock.getsockname()[1]) is True
@@ -282,15 +305,10 @@ def test_a_lan_only_listener_reads_as_taken_without_the_process_table(monkeypatc
 
 
 def test_the_second_start_refuses_a_lan_only_listener(tmp_path):
-    address = _lan_ipv4()
-    if address is None:
-        pytest.skip("this machine has no non-loopback IPv4 address")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.bind((address, 0))
-    except OSError:
-        pytest.skip(f"cannot listen on {address} here")
-    sock.listen(8)
+    held = _listen_on_lan()
+    if held is None:
+        pytest.skip("this machine has no bindable non-loopback IPv4 address")
+    sock, _ = held
     port = sock.getsockname()[1]
     try:
         done = _cli("gateway", "start", "--port", str(port), home=tmp_path, timeout=120)
@@ -304,13 +322,9 @@ def test_the_second_start_refuses_a_lan_only_listener(tmp_path):
 
 def test_status_finds_a_lan_gateway_when_the_owner_pid_cannot_be_named(monkeypatch):
     """macOS refuses net_connections to a normal user; status must still find the gateway."""
-    address = _lan_ipv4()
-    if address is None:
-        pytest.skip("this machine has no non-loopback IPv4 address")
-    try:
-        server = _answering(address)
-    except OSError:
-        pytest.skip(f"cannot listen on {address} here")
+    server = _answering_on_lan()
+    if server is None:
+        pytest.skip("this machine has no bindable non-loopback IPv4 address")
     monkeypatch.setattr(ports, "listener_pid", lambda port: None)
     try:
         running, line = ports.gateway_status(server.server_address[1])
