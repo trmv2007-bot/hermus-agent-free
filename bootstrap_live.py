@@ -16,6 +16,11 @@ import sys
 import time
 from typing import Any
 
+from core.console_encoding import configure_console
+
+# The progress marks below are printed to a pipe when setup.ps1 runs this file.
+configure_console()
+
 _original_run = subprocess.run
 
 

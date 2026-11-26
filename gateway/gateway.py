@@ -1514,8 +1514,11 @@ DEFAULT_GATEWAY_HOST = "0.0.0.0"
 
 
 def start(port: int = None, host: str = None):
+    from gateway.ports import require_free
+
     port = port or config.gateway_port
     host = host or os.getenv("HERMUS_GATEWAY_HOST") or DEFAULT_GATEWAY_HOST
+    require_free(port, host)
     logger.info(f"[Gateway] Starting free gateway on port {port} - Single process for all platforms")
     logger.info("Endpoints: /webhook/telegram, /command, /platforms, /agents/status, /control")
     logger.info("Channels: /channels/status, /channels/start, /telegram/send")

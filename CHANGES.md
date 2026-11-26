@@ -1403,3 +1403,35 @@ the decision says which of the two it used.
 A rotating quarter of each category is held out every run, so the graded set the
 choice is made on is not the set it was tuned to see, and the held-out tasks are
 reported separately as validation.
+## A clean install ends clean, and a second start says so
+
+**The installer's last line is not a traceback.** `setup.cmd` pipes bootstrap through
+PowerShell, so Python encodes the report with the console code page rather than UTF-8,
+and the report's status marks then raised `UnicodeEncodeError` *after* a successful
+install — a fresh Windows machine finished on a traceback over work that had already
+been done. Both entry points now ask their streams for UTF-8 and settle for a
+replacement character when a stream refuses to change encoding, so the report always
+reaches the person; the marks stay in the files, and the live launcher's progress
+lines are covered by the same guard.
+
+**A second `gateway start` refuses instead of lingering.** With the port already
+bound, `hermus gateway start` used to reach uvicorn, fail to bind, and stay alive with
+its threads and no listener, so clicking a launcher twice left a gateway nobody could
+see. The port is now tested before the app is imported — a loopback connect, the OS
+listening table, then a bind with uvicorn's own socket options, because Windows lets a
+socket bind `0.0.0.0` while another already holds `127.0.0.1`. A collision prints one
+line naming the host, the port and the owning pid, and exits 1. `hermus gateway status`
+reports whether the gateway is running, on which port and its pid, and names a foreign
+process when something else holds the port.
+
+**Verification.** `tests/test_console_encoding.py` prints the real report into a
+cp1252 stream — both a switchable wrapper and one that refuses a new encoding — and
+holds the wiring that configures the console before anything can print.
+`tests/test_gateway_start_guard.py` drives the real CLI against real sockets: a held
+port refuses in under a second with the port and pid in the message, a loopback
+listener is seen from a wildcard start (Windows will bind `0.0.0.0` beside it), a
+listener bound only to a LAN address is found without psutil's process table, an IPv6
+host is probed in its own address family and an address this machine cannot offer is
+refused in its own words rather than read as free, `status` finds a LAN-bound gateway
+and survives a listener that is not HTTP, and the listener count on the port never
+changes.
