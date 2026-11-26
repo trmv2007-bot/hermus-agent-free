@@ -26,9 +26,11 @@ CONNECT_TIMEOUT_S = 0.2
 #: The address a start binds when nothing names one, as `gateway start` resolves it.
 ANY_INTERFACE = "0.0.0.0"
 
-#: "That address belongs to someone else's interface" — WIN32's WSAEADDRINUSE, and the
-#: POSIX value errno carries for the same meaning.
+#: "Someone already holds this port": POSIX EADDRINUSE and WIN32's WSAEADDRINUSE.
 ADDRESS_IN_USE = {errno.EADDRINUSE, 10048}
+
+#: "This account may not listen here": POSIX EACCES/EPERM and WIN32's WSAEACCES.
+PERMISSION_DENIED = {errno.EACCES, errno.EPERM, 10013}
 
 #: The addresses a probe asks, in order: this machine, whichever interface it bound.
 LOOPBACK = ("127.0.0.1", "::1")
@@ -50,21 +52,32 @@ def _accepts(port: int) -> bool:
     return False
 
 
-def _binds(host: str, port: int) -> bool | None:
-    """Would a listener on ``host:port`` get its socket, with uvicorn's options?
+def _problem_from(exc: OSError) -> str:
+    """Which of the three bind failures ``exc`` is, in a word the caller can print."""
+    codes = {exc.errno, getattr(exc, "winerror", None)}
+    if codes & ADDRESS_IN_USE:
+        return "taken"
+    if codes & PERMISSION_DENIED:
+        return "denied"
+    return "unavailable"
 
-    ``None`` is "this machine cannot even try": an address family the kernel does not
-    offer, or a host that does not resolve. That is not a free port, and it is not a
-    taken one either — the caller says which of the three it found.
+
+def _bind_problem(host: str, port: int) -> str | None:
+    """None when this machine would grant the bind, else why it would not.
+
+    ``taken`` is another socket holding it; ``denied`` is a port this account may not
+    listen on; ``unavailable`` is an address or family this machine does not have —
+    a stale ``HERMUS_GATEWAY_HOST`` after a DHCP change, or IPv6 switched off. None of
+    the three is a free port, and each has its own sentence.
     """
     try:
         family, _, _, _, sockaddr = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0]
     except socket.gaierror:
-        return None
+        return "unavailable"
     try:
         probe = socket.socket(family, socket.SOCK_STREAM)
     except OSError:
-        return None
+        return "unavailable"
     with probe:
         if os.name != "nt":
             # uvicorn sets this too; without it a socket in TIME_WAIT refuses a bind.
@@ -72,13 +85,8 @@ def _binds(host: str, port: int) -> bool | None:
         try:
             probe.bind(sockaddr)
         except OSError as exc:
-            # Only "someone already holds it" is a taken port. A host this machine
-            # does not own (a stale HERMUS_GATEWAY_HOST after a DHCP change) or a
-            # privileged port answers EADDRNOTAVAIL / EACCES, and calling that "in
-            # use" sends the person looking for a holder that does not exist.
-            taken = exc.errno in ADDRESS_IN_USE or getattr(exc, "winerror", None) == 10048
-            return False if taken else None
-    return True
+            return _problem_from(exc)
+    return None
 
 
 def listener_pid(port: int) -> int | None:
@@ -109,9 +117,9 @@ def port_in_use(port: int, host: str = ANY_INTERFACE) -> bool:
         return True
     if listener_pid(port) is not None:
         return True
-    # A bind the kernel cannot attempt is not a free port: a start that proceeded
+    # A bind this machine would refuse is not a free port: a start that proceeded
     # would meet uvicorn's own error instead of our one line.
-    return _binds(host, port) is not True
+    return _bind_problem(host, port) is not None
 
 
 def require_free(port: int, host: str | None = None) -> None:
@@ -120,9 +128,15 @@ def require_free(port: int, host: str | None = None) -> None:
     if not port_in_use(port, host):
         return
     pid = listener_pid(port)
+    problem = _bind_problem(host, port)
     if pid is not None:
         print(f"Hermus gateway did not start: {host}:{port} is already in use by pid {pid}.", flush=True)
-    elif _binds(host, port) is None:
+    elif problem == "denied":
+        print(
+            f"Hermus gateway did not start: listening on {host}:{port} needs a permission this account does not have.",
+            flush=True,
+        )
+    elif problem == "unavailable":
         print(
             f"Hermus gateway did not start: this machine cannot listen on {host}:{port} (the address is not available here).",
             flush=True,

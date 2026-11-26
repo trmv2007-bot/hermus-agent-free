@@ -9,6 +9,7 @@ proven where a person meets it, and no test process is left running.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import socket
@@ -295,7 +296,7 @@ def test_a_host_this_machine_does_not_own_refuses_with_the_right_reason(capsys):
     """A stale HERMUS_GATEWAY_HOST is not a port somebody holds; say so."""
     port = _free_port()
     for address in ("192.0.2.1", "198.51.100.1", "203.0.113.1"):
-        if ports._binds(address, port) is not None:
+        if ports._bind_problem(address, port) != "unavailable":
             continue
         with pytest.raises(SystemExit) as refused:
             ports.require_free(port, address)
@@ -306,6 +307,29 @@ def test_a_host_this_machine_does_not_own_refuses_with_the_right_reason(capsys):
         assert "already in use" not in message
         return
     pytest.skip("every TEST-NET address is bindable on this machine")
+
+
+def test_a_bind_failure_is_named_for_what_it_is():
+    """Taken, denied and unavailable are three different sentences for a person."""
+    assert ports._problem_from(OSError(errno.EADDRINUSE, "in use")) == "taken"
+    assert ports._problem_from(PermissionError(errno.EACCES, "denied")) == "denied"
+    assert ports._problem_from(OSError(errno.EADDRNOTAVAIL, "no such address")) == "unavailable"
+    assert ports._problem_from(OSError(errno.EINVAL, "unexpected")) == "unavailable"
+
+
+def test_a_privileged_port_refuses_with_the_permission_reason(monkeypatch, capsys):
+    """A port this account may not listen on is not a missing address and not a holder."""
+    port = _free_port()
+    monkeypatch.setattr(ports, "_bind_problem", lambda host, wanted: "denied")
+
+    with pytest.raises(SystemExit) as refused:
+        ports.require_free(port)
+
+    assert refused.value.code == 1
+    message = capsys.readouterr().out.strip()
+    assert "needs a permission" in message
+    assert "already in use" not in message
+    assert "not available here" not in message
 
 
 def test_a_lan_only_listener_reads_as_taken_without_the_process_table(monkeypatch):
