@@ -291,6 +291,23 @@ def test_status_finds_a_gateway_bound_to_a_lan_address():
     assert str(os.getpid()) in line
 
 
+def test_a_host_this_machine_does_not_own_refuses_with_the_right_reason(capsys):
+    """A stale HERMUS_GATEWAY_HOST is not a port somebody holds; say so."""
+    port = _free_port()
+    for address in ("192.0.2.1", "198.51.100.1", "203.0.113.1"):
+        if ports._binds(address, port) is not None:
+            continue
+        with pytest.raises(SystemExit) as refused:
+            ports.require_free(port, address)
+        assert refused.value.code == 1
+        message = capsys.readouterr().out.strip()
+        assert f"{address}:{port}" in message
+        assert "cannot listen" in message
+        assert "already in use" not in message
+        return
+    pytest.skip("every TEST-NET address is bindable on this machine")
+
+
 def test_a_lan_only_listener_reads_as_taken_without_the_process_table(monkeypatch):
     """A gateway bound only to 192.168.x.x must still be seen: loopback never answers it."""
     held = _listen_on_lan()

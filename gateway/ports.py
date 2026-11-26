@@ -9,6 +9,7 @@ a collision is one printed line and a non-zero exit.
 
 from __future__ import annotations
 
+import errno
 import http.client
 import json
 import os
@@ -24,6 +25,10 @@ CONNECT_TIMEOUT_S = 0.2
 
 #: The address a start binds when nothing names one, as `gateway start` resolves it.
 ANY_INTERFACE = "0.0.0.0"
+
+#: "That address belongs to someone else's interface" — WIN32's WSAEADDRINUSE, and the
+#: POSIX value errno carries for the same meaning.
+ADDRESS_IN_USE = {errno.EADDRINUSE, 10048}
 
 #: The addresses a probe asks, in order: this machine, whichever interface it bound.
 LOOPBACK = ("127.0.0.1", "::1")
@@ -66,8 +71,13 @@ def _binds(host: str, port: int) -> bool | None:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(sockaddr)
-        except OSError:
-            return False
+        except OSError as exc:
+            # Only "someone already holds it" is a taken port. A host this machine
+            # does not own (a stale HERMUS_GATEWAY_HOST after a DHCP change) or a
+            # privileged port answers EADDRNOTAVAIL / EACCES, and calling that "in
+            # use" sends the person looking for a holder that does not exist.
+            taken = exc.errno in ADDRESS_IN_USE or getattr(exc, "winerror", None) == 10048
+            return False if taken else None
     return True
 
 
