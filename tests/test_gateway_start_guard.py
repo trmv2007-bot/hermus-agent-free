@@ -345,6 +345,7 @@ def test_a_reserved_port_points_at_the_reservation_not_the_account(monkeypatch, 
     message = capsys.readouterr().out.strip()
     assert f"reserves port {port}" in message
     assert "pick another port" in message
+    assert "show excludedportrange protocol=tcp" in message
     assert "permission" not in message
 
 

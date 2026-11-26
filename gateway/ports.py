@@ -147,7 +147,7 @@ def require_free(port: int, host: str | None = None) -> None:
     elif problem == "reserved":
         print(
             f"Hermus gateway did not start: Windows reserves port {port}, so nothing can listen there; "
-            "pick another port (netsh interface ipv4 show excludedportrange lists them).",
+            "pick another port (netsh interface ipv4 show excludedportrange protocol=tcp lists them).",
             flush=True,
         )
     elif problem == "unavailable":
