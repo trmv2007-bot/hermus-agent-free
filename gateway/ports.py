@@ -29,8 +29,13 @@ ANY_INTERFACE = "0.0.0.0"
 #: "Someone already holds this port": POSIX EADDRINUSE and WIN32's WSAEADDRINUSE.
 ADDRESS_IN_USE = {errno.EADDRINUSE, 10048}
 
-#: "This account may not listen here": POSIX EACCES/EPERM and WIN32's WSAEACCES.
-PERMISSION_DENIED = {errno.EACCES, errno.EPERM, 10013}
+#: "This account may not listen here": POSIX EACCES and EPERM.
+PERMISSION_DENIED = {errno.EACCES, errno.EPERM}
+
+#: Windows' WSAEACCES, which it also uses for a port inside an excluded range
+#: (Hyper-V, WSL2 and Docker reserve blocks via winnat). Changing account rights
+#: never clears that, so it gets its own sentence and its own advice.
+RESERVED_PORT = {10013}
 
 #: The addresses a probe asks, in order: this machine, whichever interface it bound.
 LOOPBACK = ("127.0.0.1", "::1")
@@ -57,6 +62,8 @@ def _problem_from(exc: OSError) -> str:
     codes = {exc.errno, getattr(exc, "winerror", None)}
     if codes & ADDRESS_IN_USE:
         return "taken"
+    if codes & RESERVED_PORT:
+        return "reserved"
     if codes & PERMISSION_DENIED:
         return "denied"
     return "unavailable"
@@ -66,9 +73,10 @@ def _bind_problem(host: str, port: int) -> str | None:
     """None when this machine would grant the bind, else why it would not.
 
     ``taken`` is another socket holding it; ``denied`` is a port this account may not
-    listen on; ``unavailable`` is an address or family this machine does not have —
-    a stale ``HERMUS_GATEWAY_HOST`` after a DHCP change, or IPv6 switched off. None of
-    the three is a free port, and each has its own sentence.
+    listen on; ``reserved`` is a Windows excluded-range port nothing may bind;
+    ``unavailable`` is an address or family this machine does not have — a stale
+    ``HERMUS_GATEWAY_HOST`` after a DHCP change, or IPv6 switched off. None of them is
+    a free port, and each has its own sentence and its own next step.
     """
     try:
         family, _, _, _, sockaddr = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)[0]
@@ -134,6 +142,12 @@ def require_free(port: int, host: str | None = None) -> None:
     elif problem == "denied":
         print(
             f"Hermus gateway did not start: listening on {host}:{port} needs a permission this account does not have.",
+            flush=True,
+        )
+    elif problem == "reserved":
+        print(
+            f"Hermus gateway did not start: Windows reserves port {port}, so nothing can listen there; "
+            "pick another port (netsh interface ipv4 show excludedportrange lists them).",
             flush=True,
         )
     elif problem == "unavailable":

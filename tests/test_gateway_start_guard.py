@@ -313,6 +313,7 @@ def test_a_bind_failure_is_named_for_what_it_is():
     """Taken, denied and unavailable are three different sentences for a person."""
     assert ports._problem_from(OSError(errno.EADDRINUSE, "in use")) == "taken"
     assert ports._problem_from(PermissionError(errno.EACCES, "denied")) == "denied"
+    assert ports._problem_from(OSError(10013, "reserved")) == "reserved"
     assert ports._problem_from(OSError(errno.EADDRNOTAVAIL, "no such address")) == "unavailable"
     assert ports._problem_from(OSError(errno.EINVAL, "unexpected")) == "unavailable"
 
@@ -330,6 +331,21 @@ def test_a_privileged_port_refuses_with_the_permission_reason(monkeypatch, capsy
     assert "needs a permission" in message
     assert "already in use" not in message
     assert "not available here" not in message
+
+
+def test_a_reserved_port_points_at_the_reservation_not_the_account(monkeypatch, capsys):
+    """Windows refuses reserved ports regardless of rights; the advice must say so."""
+    port = _free_port()
+    monkeypatch.setattr(ports, "_bind_problem", lambda host, wanted: "reserved")
+
+    with pytest.raises(SystemExit) as refused:
+        ports.require_free(port)
+
+    assert refused.value.code == 1
+    message = capsys.readouterr().out.strip()
+    assert f"reserves port {port}" in message
+    assert "pick another port" in message
+    assert "permission" not in message
 
 
 def test_a_lan_only_listener_reads_as_taken_without_the_process_table(monkeypatch):
