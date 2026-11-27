@@ -170,10 +170,14 @@ def serve(
 
     say(f"keeper: watching {host}:{port} - the gateway runs as {sys.executable}")
     wait = restart_seconds
-    wedged_since: float | None = None
+    #: The pid that is holding the port without answering, and since when. The timer
+    #: belongs to that process: a replacement, or a keeper's other launch of its own
+    #: gateway, gets a boot's worth of silence of its own rather than inheriting the
+    #: deadline of the process it replaced.
+    wedged: tuple[int, float] | None = None
     while not stop.is_set():
         if ports.live_gateway(port) is not None:
-            wedged_since = None
+            wedged = None
             stop.wait(poll_seconds)
             continue
         held = ports.holder(port)
@@ -183,16 +187,17 @@ def serve(
                 # Ours, and not answering: either it is still booting or it is wedged.
                 # Waiting on it forever leaves the room dark behind a port nobody can
                 # free, so after a boot's worth of silence the keeper replaces it.
-                if wedged_since is None:
-                    wedged_since = time.time()
-                silent = time.time() - wedged_since
+                now = time.time()
+                if wedged is None or wedged[0] != pid:
+                    wedged = (int(pid), now)
+                silent = now - wedged[1]
                 if silent >= wedged_seconds:
                     say(f"keeper: the gateway on {host}:{port} has not answered for {silent:.0f}s (pid {pid}); replacing it")
                     if not stop_process(pid):
                         say(f"keeper: pid {pid} did not stop; leaving the port to it")
                         stop.wait(poll_seconds)
                         continue
-                    wedged_since = None
+                    wedged = None
                     said.clear()
                     stop.wait(1.0)
                     continue
@@ -208,7 +213,7 @@ def serve(
             say_once(f"keeper: cannot listen on {host}:{port}: {reason}; the room stays down until that changes")
             stop.wait(poll_seconds)
             continue
-        wedged_since = None
+        wedged = None
         said.clear()
         started = time.time()
         try:

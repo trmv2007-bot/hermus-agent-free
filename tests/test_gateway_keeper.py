@@ -183,6 +183,26 @@ def test_a_gateway_that_is_still_booting_is_given_its_time(monkeypatch, capsys):
     assert "is not answering yet (pid 9912); waiting for it" in out
 
 
+def test_a_replacement_gateway_gets_its_own_grace_period(monkeypatch):
+    """The silence timer belongs to the pid: a new holder must not inherit the old one's."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", lambda port, host=keeper.LOOPBACK: None)
+    pids = [11, 12, 12]
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: orphan(pids.pop(0)) if pids else orphan(12))
+    clock = iter([0.0, 30.0, 70.0])
+    monkeypatch.setattr(keeper.time, "time", lambda: next(clock, 70.0))
+    stopped: list[int] = []
+    monkeypatch.setattr(keeper, "stop_process", lambda pid: stopped.append(pid) or True)
+    started: list[list[str]] = []
+
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=3), wedged_seconds=60.0)
+
+    # pid 11 has been silent since 0 s and is gone by 30 s; pid 12 appeared at 30 s, so at
+    # 70 s it has only been silent for 40 s and its boot must not be cut short.
+    assert stopped == []
+    assert started == []
+
+
 def test_a_wedge_that_will_not_die_is_not_started_over(monkeypatch, capsys):
     """If the orphan cannot be stopped, a second gateway would only fight for the port."""
     monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)

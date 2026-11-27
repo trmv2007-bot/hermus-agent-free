@@ -1518,7 +1518,9 @@ only came back when a person killed that process by hand.
 - **A gateway of this install holds it and does not answer** — a wedge or a boot. A boot is
   silence for a moment; a wedge is minutes of it, so after `WEDGED_SECONDS` (60 s) the
   keeper stops that process and everything it started, logs `has not answered for 64s (pid
-  20992); replacing it`, and starts a fresh gateway. Only a process whose command line names
+  20992); replacing it`, and starts a fresh gateway. The timer belongs to the pid it was
+  started for, so a replacement gets its own boot's worth of silence instead of inheriting
+  the deadline of the process it replaced. Only a process whose command line names
   this checkout's own `hermus.py gateway …` is ever replaced; anything else, including a
   gateway from another checkout, is left alone.
 - **This machine would refuse the bind** — the keeper says which refusal (`Windows reserves
