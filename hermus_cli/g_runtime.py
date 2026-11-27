@@ -100,6 +100,16 @@ def _configure_gateway(subparsers) -> None:
     )
     gateway_status = gateway_sub.add_parser("status", help="Is the gateway running, on which port, and its pid")
     gateway_status.add_argument("--port", type=int, default=int(os.environ.get("HERMUS_GATEWAY_PORT") or config.gateway_port))
+    gateway_service = gateway_sub.add_parser(
+        "service",
+        help="Keep the gateway up: run it, and run it again whenever it exits (what the logon task runs)",
+    )
+    gateway_service.add_argument("--port", type=int, default=config.gateway_port)
+    gateway_service.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Interface to bind (default 127.0.0.1: the room answers on this machine only)",
+    )
 
 
 def _run_gateway(args, ctx: CLIContext) -> None:
@@ -122,6 +132,13 @@ def _run_gateway(args, ctx: CLIContext) -> None:
         running, line = gateway_status(args.port)
         print(line)
         raise SystemExit(0 if running else 1)
+    elif args.gateway_action == "service":
+        # The action a logon task runs. It never exits on its own while the room is
+        # meant to be up: the supervisor restarts the gateway, and this log is where
+        # a room that went dark says when and why.
+        from gateway.keeper import serve
+
+        serve(args.port, getattr(args, "host", None) or "127.0.0.1", log=config.resolve_path("logs/gateway-service.log"))
     else:
         no_action(ctx, "gateway")
 

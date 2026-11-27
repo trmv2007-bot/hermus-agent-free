@@ -63,6 +63,7 @@ real user home, because a suite once deleted a person's setup record.
 |---|---|
 | `hermus` | Install if needed, start the gateway on `127.0.0.1`, open the room |
 | `hermus gateway start [--port N] [--host H]` | The gateway on its own; binds `0.0.0.0` unless `--host` or `HERMUS_GATEWAY_HOST` says otherwise |
+| `hermus gateway service [--port N] [--host H]` | The same gateway kept up: starts it, starts it again whenever it exits, and leaves a gateway that is already serving alone. Binds `127.0.0.1` by default. This is the action a logon task runs. |
 | `hermus tui` | Terminal chat |
 | `hermus doctor` | Full installation and runtime diagnosis |
 | `hermus bootstrap` | Setup and health in one idempotent command |
