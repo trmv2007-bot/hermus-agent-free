@@ -2,14 +2,21 @@
 
 The room's gateway is started by a scheduled task with no session behind it. That
 task runs the keeper, which owns port 8000 and restarts the gateway whenever it
-exits. Its two refusals are the whole safety contract: never start a second
-gateway beside one that already answers, and never take a port another process
-holds. Both are proven here with a fake spawn, so no test opens a socket.
+exits. Its refusals are the whole safety contract: never start a second gateway
+beside one that already answers, and never take a port another process holds. The
+one holder it may replace is a gateway of its own install that has stopped
+answering, because that orphan leaves the room dark behind a port nobody can
+free. All of it is proven here with a fake spawn and a fake port, so no test opens
+a socket.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -17,6 +24,20 @@ import pytest
 from gateway import keeper
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def foreign(pid: int = 9911, argv: list[str] | None = None) -> dict:
+    """A process on the port that is not a gateway of this install."""
+    return {"pid": pid, "name": "python.exe", "cmdline": argv or [sys.executable, "-m", "http.server", "8000"]}
+
+
+def orphan(pid: int = 9912) -> dict:
+    """A gateway of this install — the keeper's own, left running and frozen."""
+    return {
+        "pid": pid,
+        "name": "python.exe",
+        "cmdline": [sys.executable, str(ROOT / "hermus.py"), "gateway", "start", "--port", "8000"],
+    }
 
 
 class Stopper:
@@ -62,11 +83,15 @@ def no_gateway(monkeypatch):
     def answer(port):
         return None
 
-    def free(port, host=keeper.LOOPBACK):
-        return False
+    def nothing_holds(port):
+        return None
+
+    def bindable(port, host=keeper.LOOPBACK):
+        return None
 
     monkeypatch.setattr(keeper.ports, "live_gateway", answer)
-    monkeypatch.setattr(keeper.ports, "port_in_use", free)
+    monkeypatch.setattr(keeper.ports, "holder", nothing_holds)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", bindable)
 
 
 def test_a_gateway_already_serving_the_port_is_left_alone(monkeypatch):
@@ -83,98 +108,180 @@ def test_a_gateway_already_serving_the_port_is_left_alone(monkeypatch):
 def test_a_port_another_process_holds_is_not_taken(monkeypatch, capsys):
     """A listener that is not this gateway is not a gateway to restart over."""
     monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
-    monkeypatch.setattr(keeper.ports, "port_in_use", lambda port, host=keeper.LOOPBACK: True)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: foreign())
     started: list[list[str]] = []
-    stop = Stopper(after=2)
 
-    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=stop)
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=2))
 
     assert started == []
-    assert "held by another process" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "127.0.0.1:8000 is held by pid 9911 (python.exe); leaving it alone" in out
+    assert "pid 9911" in out
 
 
-def test_the_gateway_runs_on_loopback_from_this_installs_own_interpreter(no_gateway):
-    """The action must bind loopback and use the venv that owns the packages."""
+def test_a_stranger_on_the_port_is_named_once_not_once_poll(monkeypatch, capsys):
+    """A standing condition is one line: forty of them before breakfast is not a log."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: foreign())
+
+    keeper.serve(8000, spawn=lambda argv: Child(), stop=Stopper(after=4))
+
+    assert capsys.readouterr().out.count("leaving it alone") == 1
+
+
+def test_a_holder_too_dead_to_name_is_still_not_taken(monkeypatch, capsys):
+    """Something answers that this account may not name: it is not ours to remove."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: {"pid": None, "name": None, "cmdline": []})
     started: list[list[str]] = []
-    stop = Stopper(after=0)
 
-    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=stop)
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=1))
 
-    assert len(started) == 1
-    argv = started[0]
-    assert argv[0] == sys.executable
-    assert Path(argv[1]) == ROOT / "hermus.py"
-    assert argv[2:] == ["gateway", "start", "--port", "8000", "--host", "127.0.0.1"]
+    assert started == []
+    assert "a process this account cannot name" in capsys.readouterr().out
 
 
-def test_a_gateway_that_keeps_dying_backs_off_instead_of_spinning(no_gateway):
-    """A broken start retries within the minute, then less often, never in a hot loop."""
-    stop = Stopper(after=4)
+def test_a_gateway_of_this_install_that_stopped_answering_is_replaced(monkeypatch, capsys):
+    """The reported defect: our frozen gateway holds the port and the room stays dark.
 
-    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=stop)
+    A wedged gateway keeps its socket, so the port reads as taken by a process the
+    keeper must not fight — except that this one is its own install's gateway, and
+    the room comes back only if it is replaced.
+    """
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    answers = [orphan()]
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: answers.pop() if answers else None)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", lambda port, host=keeper.LOOPBACK: None)
+    stopped: list[int] = []
+    monkeypatch.setattr(keeper, "stop_process", lambda pid: stopped.append(pid) or True)
+    started: list[list[str]] = []
 
-    delays = [w for w in stop.waits if w >= keeper.RESTART_SECONDS]
-    assert delays[:4] == [3.0, 6.0, 12.0, 24.0]
-    assert max(delays) <= keeper.MAX_RESTART_SECONDS
+    keeper.serve(
+        8000,
+        spawn=lambda argv: started.append(argv) or Child(),
+        stop=Stopper(after=2),
+        wedged_seconds=0.0,
+    )
 
-
-def test_a_gateway_that_served_a_healthy_run_is_restarted_promptly(monkeypatch, no_gateway):
-    """A healthy run resets the backoff, so the next crash gets seconds, not the cap."""
-    monkeypatch.setattr(keeper, "HEALTHY_RUN_SECONDS", 0.0)
-    stop = Stopper(after=2)
-
-    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=stop)
-
-    assert [w for w in stop.waits if w >= keeper.RESTART_SECONDS] == [keeper.RESTART_SECONDS] * 3
-
-
-def test_the_keeper_prints_only_what_a_console_can_encode(no_gateway, capsys):
-    """The keeper's log line must not be the thing that kills it on a codepage."""
-    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=Stopper(after=1))
-    printed = capsys.readouterr().out
-    assert printed
-    printed.encode("ascii")
-
-
-def test_each_launch_is_recorded_before_the_keeper_waits_for_it(no_gateway, tmp_path):
-    """A child that hangs in boot must still leave its launch in the log."""
-    log = tmp_path / "gateway-service.log"
-
-    keeper.serve(8000, spawn=lambda argv: Child(code=1, pid=9931), stop=Stopper(after=0), log=log)
-
-    text = log.read_text(encoding="utf-8")
-    assert "gateway started (pid 9931)" in text
-    assert "gateway exited (1)" in text
+    assert stopped == [9912]
+    assert started, "the keeper replaced the wedge and then started the room"
+    out = capsys.readouterr().out
+    assert "has not answered" in out and "pid 9912" in out
+    assert "gateway started" in out
 
 
-def test_a_console_that_cannot_print_does_not_end_supervision(no_gateway, tmp_path, monkeypatch):
-    """A codepage that refuses the line is not a reason to stop keeping the room up."""
+def test_a_gateway_that_is_still_booting_is_given_its_time(monkeypatch, capsys):
+    """A cold boot imports the whole app: silence for a poll is not a wedge."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: orphan())
+    stopped: list[int] = []
+    monkeypatch.setattr(keeper, "stop_process", lambda pid: stopped.append(pid) or True)
+    started: list[list[str]] = []
 
-    class Refusing:
-        def write(self, text):
-            raise UnicodeEncodeError("cp1252", text, 0, 1, "not representable")
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=2))
 
-        def flush(self):
-            raise UnicodeEncodeError("cp1252", "", 0, 0, "not representable")
-
-        def reconfigure(self, **kwargs):
-            raise ValueError("this stream cannot be reconfigured")
-
-    log = tmp_path / "gateway-service.log"
-    monkeypatch.setattr(keeper.sys, "stdout", Refusing())
-
-    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=Stopper(after=1), log=log)
-
-    text = log.read_text(encoding="utf-8")
-    assert "gateway started" in text
-    assert "gateway exited (1)" in text
+    assert stopped == [] and started == []
+    out = capsys.readouterr().out
+    assert "is not answering yet (pid 9912); waiting for it" in out
 
 
-def test_the_cli_exposes_the_service_action():
-    """`hermus gateway service` is the action the logon task names, so it must parse."""
-    from hermus_cli import build_parser
+def test_a_replacement_gateway_gets_its_own_grace_period(monkeypatch):
+    """The silence timer belongs to the pid: a new holder must not inherit the old one's."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", lambda port, host=keeper.LOOPBACK: None)
+    pids = [11, 12, 12]
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: orphan(pids.pop(0)) if pids else orphan(12))
+    clock = iter([0.0, 30.0, 70.0])
+    monkeypatch.setattr(keeper.time, "time", lambda: next(clock, 70.0))
+    stopped: list[int] = []
+    monkeypatch.setattr(keeper, "stop_process", lambda pid: stopped.append(pid) or True)
+    started: list[list[str]] = []
 
-    args = build_parser().parse_args(["gateway", "service"])
-    assert args.gateway_action == "service"
-    assert args.host == "127.0.0.1"
-    assert args.port == 8000
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=3), wedged_seconds=60.0)
+
+    # pid 11 has been silent since 0 s and is gone by 30 s; pid 12 appeared at 30 s, so at
+    # 70 s it has only been silent for 40 s and its boot must not be cut short.
+    assert stopped == []
+    assert started == []
+
+
+def test_a_wedge_that_will_not_die_is_not_started_over(monkeypatch, capsys):
+    """If the orphan cannot be stopped, a second gateway would only fight for the port."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: orphan())
+    monkeypatch.setattr(keeper, "stop_process", lambda pid: False)
+    started: list[list[str]] = []
+
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=1), wedged_seconds=0.0)
+
+    assert started == []
+    assert "did not stop" in capsys.readouterr().out
+
+
+def test_a_probe_that_lies_once_does_not_darken_the_room(monkeypatch):
+    """One poll that reports a holder where there is none must cost one poll, not the room."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    answers = [foreign(pid=4321)]
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: answers.pop() if answers else None)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", lambda port, host=keeper.LOOPBACK: None)
+    started: list[list[str]] = []
+
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=2))
+
+    assert started, "one false positive left the room down"
+
+
+def test_a_port_this_machine_would_refuse_is_reported_as_that(monkeypatch, capsys):
+    """A reserved or forbidden port is not another process holding it."""
+    monkeypatch.setattr(keeper.ports, "live_gateway", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "holder", lambda port: None)
+    monkeypatch.setattr(keeper.ports, "bind_blocker", lambda port, host=keeper.LOOPBACK: "reserved")
+    started: list[list[str]] = []
+
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=Stopper(after=1))
+
+    assert started == []
+    out = capsys.readouterr().out
+    assert "cannot listen on 127.0.0.1:8000" in out
+    assert "reserves this port" in out
+    assert "another process" not in out
+
+
+def test_stopping_a_wedged_gateway_stops_what_it_started():
+    """The replacement path is a real kill, not a request: prove it on a real tree."""
+    psutil = pytest.importorskip("psutil")
+    marker = f"keeper-stop-test-{os.getpid()}"
+    script = chr(10).join(
+        [
+            "import subprocess, sys, time",
+            "subprocess.run([sys.executable, '-c', 'import time; time.sleep(30)'])",
+            f"time.sleep(30)  # {marker}",
+        ]
+    )
+    worker = threading.Thread(target=subprocess.run, args=([sys.executable, "-c", script],), daemon=True)
+    worker.start()
+    parent = None
+    children: list = []
+    try:
+        deadline = time.time() + 30
+        while time.time() < deadline and parent is None:
+            for proc in psutil.process_iter(["pid", "cmdline"]):
+                if any(marker in part for part in (proc.info.get("cmdline") or [])):
+                    parent = psutil.Process(proc.pid)
+                    break
+            if parent is None:
+                time.sleep(0.1)
+        assert parent is not None, "the test tree never appeared"
+        while time.time() < deadline and not children:
+            children = parent.children(recursive=True)
+            time.sleep(0.1)
+        assert children, "the test tree never started anything to stop"
+
+        assert keeper.stop_process(parent.pid) is True
+        assert all(not child.is_running() for child in children)
+    finally:
+        for victim in children + ([parent] if parent is not None else []):
+            try:
+                victim.kill()
+            except psutil.Error:
+                pass

@@ -112,6 +112,61 @@ def listener_pid(port: int) -> int | None:
     return None
 
 
+def process_info(pid: int) -> dict | None:
+    """``{pid, name, cmdline}`` for a live process, or None when the OS will not say.
+
+    A pid the table names but the kernel has already reaped is not a process: it is
+    the answer a kill leaves behind for a moment, and a caller that believed it would
+    wait for a port nobody holds.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        proc = psutil.Process(pid)
+        return {"pid": int(pid), "name": proc.name(), "cmdline": proc.cmdline()}
+    except (psutil.Error, OSError):
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether the kernel still has this process; a table row alone is not enough."""
+    try:
+        import psutil
+    except ImportError:
+        return True
+    try:
+        return psutil.pid_exists(int(pid))
+    except (psutil.Error, OSError):
+        return True
+
+
+def holder(port: int) -> dict | None:
+    """Who holds ``port``: ``{pid, name, cmdline}``, or None when nothing does.
+
+    ``pid`` is None when something answers but this account may not name it, so a
+    caller can tell "a process we cannot identify" from "the port is free". Asking
+    the process table first keeps the common case cheap: a listener there means the
+    connect probe and its timeouts are not needed.
+    """
+    pid = listener_pid(port)
+    if pid is not None and pid_alive(pid):
+        return process_info(pid) or {"pid": int(pid), "name": None, "cmdline": []}
+    if _accepts(port):
+        return {"pid": None, "name": None, "cmdline": []}
+    return None
+
+
+def bind_blocker(port: int, host: str = ANY_INTERFACE) -> str | None:
+    """Why this machine would refuse to listen on ``host:port`` — see ``_bind_problem``.
+
+    None is a port this start may take. Anything else is not a held port: it is the
+    machine saying no, and a caller must not report that as another process.
+    """
+    return _bind_problem(host, port)
+
+
 def port_in_use(port: int, host: str = ANY_INTERFACE) -> bool:
     """Is something already serving or holding this port?
 

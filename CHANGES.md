@@ -1498,3 +1498,55 @@ probe which never answers reports failure and undoes the entry — with PowerShe
 runner that decodes the script and no test ever calling `schtasks`. Measured on this PC: a real
 per-user logon task was registered, started and undone without elevation, and a real launcher
 started the room with its own exit code.
+
+## The keeper starts the room when the port is actually free
+
+After #106 the keeper watched the port and restarted its gateway when it exited, but it
+answered every non-answer with one sentence and one action: "held by another process;
+leaving it alone". Three different situations collapsed into it — a stranger on the port,
+this install's own gateway bound to it while `/healthz` said nothing, and a port the
+machine itself refuses to bind — and in the last two the room stayed dark forever. The
+install's own log records it: from 12:53:52 to 13:23:59 the keeper wrote that line every
+poll while port 8000 was held by a Hermus gateway that had stopped answering, and the room
+only came back when a person killed that process by hand.
+
+`gateway/keeper.py` now asks who holds the port before deciding:
+
+- **Nothing holds it** — it starts the gateway, as before.
+- **A stranger holds it** — it leaves the port alone and names the holder once (`pid 9911
+  (python.exe)`), instead of printing the same line for every 20 s poll.
+- **A gateway of this install holds it and does not answer** — a wedge or a boot. A boot is
+  silence for a moment; a wedge is minutes of it, so after `WEDGED_SECONDS` (60 s) the
+  keeper stops that process and everything it started, logs `has not answered for 64s (pid
+  20992); replacing it`, and starts a fresh gateway. The timer belongs to the pid it was
+  started for, so a replacement gets its own boot's worth of silence instead of inheriting
+  the deadline of the process it replaced. Only a process whose command line names
+  this checkout's own `hermus.py gateway …` is ever replaced; anything else, including a
+  gateway from another checkout, is left alone.
+- **This machine would refuse the bind** — the keeper says which refusal (`Windows reserves
+  this port for itself`, `this account may not listen there`, …) instead of blaming another
+  process.
+
+`gateway/ports.holder` answers "who" — pid, image and command line where the OS will say,
+`pid: None` when something answers that this account may not name, and `None` when the port
+is free, with a check that the process the table names still exists so a row left by a kill
+is not read as a holder. `gateway/ports.bind_blocker` keeps the bind probe's refusal
+separate from occupancy, which is what let one sentence cover both.
+
+**Verification**, both measured on this PC with an isolated `HERMUS_HOME` and a scratch port:
+
+- With the keeper running and nothing on the port, killing the gateway it named returned
+  `/healthz 200` 37 s later: `gateway exited (15) after 30s; restarting in 3s` then
+  `gateway started (pid 20340)` in the keeper's own log.
+- Before the fix, a frozen gateway of this install holding the port left the keeper writing
+  "held by another process" every poll and the room dark. After it, the log reads
+  `held by a gateway that is not answering yet (pid 20992); waiting for it` at +16 s,
+  `has not answered for 64s (pid 20992); replacing it` at +82 s, `gateway started (pid
+  24140)` at +93 s and `/healthz 200` at +110 s.
+
+`tests/test_gateway_keeper.py` gains nine tests: the wedge replaced, a boot given its dwell,
+a foreign holder named once and left alone, an unnamed holder left alone, a wedge that will
+not die not started over, one false positive costing one poll, a machine refusal reported as
+itself, and a real process tree stopped by `stop_process`. `tests/test_gateway_start_guard.py`
+gains four: the holder named with what the OS knows, a free port with no holder, a table row
+for a reaped process not read as a holder, and the bind refusal arriving unadorned.
