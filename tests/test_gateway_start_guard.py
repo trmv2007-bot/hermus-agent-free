@@ -446,3 +446,35 @@ def test_status_survives_a_listener_that_is_not_http(tmp_path, non_http_port):
     assert done.returncode == 1
     assert "Traceback" not in done.stderr
     assert f"port {non_http_port}" in done.stdout
+
+
+def test_the_holder_is_named_with_what_the_os_knows(held_port):
+    """A keeper that may replace a wedge must know whose process it is looking at."""
+    who = ports.holder(held_port)
+
+    assert who is not None
+    assert who["pid"] == os.getpid()
+    assert who["name"] and "python" in who["name"].lower()
+    assert any("python" in part.lower() for part in who["cmdline"]), who["cmdline"]
+
+
+def test_a_free_port_has_no_holder():
+    assert ports.holder(_free_port()) is None
+
+
+def test_a_table_row_for_a_reaped_process_is_not_a_holder(monkeypatch):
+    """A stale row reads as a held port; the keeper would idle on a process that is gone."""
+    port = _free_port()
+    monkeypatch.setattr(ports, "listener_pid", lambda wanted: 999999)
+    monkeypatch.setattr(ports, "pid_alive", lambda pid: False)
+    monkeypatch.setattr(ports, "_accepts", lambda wanted: False)
+
+    assert ports.holder(port) is None
+
+
+def test_a_bind_refusal_is_not_dressed_up_as_a_holder(monkeypatch):
+    """The words a keeper prints come from the same place the refusal does."""
+    port = _free_port()
+    monkeypatch.setattr(ports, "_bind_problem", lambda host, wanted: "reserved")
+
+    assert ports.bind_blocker(port, "127.0.0.1") == "reserved"

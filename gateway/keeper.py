@@ -11,7 +11,8 @@ server happened to die. So the task runs this instead: one resident process that
 owns the port, holds the gateway as its child, and starts it again after it
 exits. There is never a second gateway: it leaves a port alone when a healthy
 gateway already answers there, and it refuses to fight any other process that
-holds it.
+holds it. The one process it will replace is a gateway of this install that has
+stopped answering — its own orphan, holding the port for a room nobody can see.
 """
 
 from __future__ import annotations
@@ -43,11 +44,74 @@ MAX_RESTART_SECONDS = 30.0
 #: next restart is prompt again instead of inheriting a grown backoff.
 HEALTHY_RUN_SECONDS = 60.0
 
+#: How long a gateway of this install may hold the port without answering before
+#: the keeper replaces it. A cold boot imports the whole app and takes tens of
+#: seconds, so a short silence is not a wedge; minutes of it is a dead room.
+WEDGED_SECONDS = 60.0
+
+#: What a refused bind means, in the one line the keeper writes for it. None of
+#: these is another process holding the port, and saying so sent a person looking
+#: for a holder that did not exist.
+BIND_REFUSALS = {
+    "taken": "another socket is bound there",
+    "reserved": "Windows reserves this port for itself",
+    "denied": "this account may not listen there",
+    "unavailable": "this machine does not have that address",
+}
+
 
 def gateway_command(port: int, host: str) -> list[str]:
     """The gateway this install starts, on the interpreter that owns its packages."""
     root = Path(__file__).resolve().parents[1]
     return [sys.executable, str(root / "hermus.py"), "gateway", "start", "--port", str(port), "--host", host]
+
+
+def own_gateway(held: dict) -> bool:
+    """Is the holder a gateway started from this install's own ``hermus.py``?
+
+    The keeper's child can outlive its supervision — a frozen gateway keeps its
+    socket bound while answering nothing — and that orphan is the keeper's to
+    replace. Another program on the port, or a gateway from a different checkout, is
+    never touched. A launch by a relative path reads as foreign: the safe way.
+    """
+    script = os.path.normcase(str(Path(__file__).resolve().parents[1] / "hermus.py"))
+    argv = held.get("cmdline") or []
+    return "gateway" in argv and any(os.path.normcase(arg) == script for arg in argv)
+
+
+def stop_process(pid: int) -> bool:
+    """Stop a wedged gateway and everything it started; True when none of it is left."""
+    try:
+        import psutil
+    except ImportError:
+        return False
+    try:
+        proc = psutil.Process(pid)
+        victims = proc.children(recursive=True) + [proc]
+    except (psutil.Error, OSError):
+        return True
+    for victim in victims:
+        try:
+            victim.kill()
+        except (psutil.Error, OSError):
+            pass
+    try:
+        _, alive = psutil.wait_procs(victims, timeout=10)
+    except (psutil.Error, OSError):
+        return False
+    return not alive
+
+
+def _holder_line(host: str, port: int, held: dict) -> str:
+    """One sentence naming who holds the port, as far as the OS would say."""
+    pid, name = held.get("pid"), held.get("name")
+    if pid is None:
+        who = "a process this account cannot name"
+    elif name:
+        who = f"pid {pid} ({name})"
+    else:
+        who = f"pid {pid}"
+    return f"keeper: {host}:{port} is held by {who}; leaving it alone"
 
 
 def serve(
@@ -59,6 +123,7 @@ def serve(
     poll_seconds: float = POLL_SECONDS,
     restart_seconds: float = RESTART_SECONDS,
     max_restart_seconds: float = MAX_RESTART_SECONDS,
+    wedged_seconds: float = WEDGED_SECONDS,
     spawn: object = None,
 ) -> None:
     """Own the port: run the gateway, and run it again whenever it goes away.
@@ -93,19 +158,58 @@ def serve(
             except OSError:
                 pass
 
+    # A standing condition — a stranger on the port, a port this machine refuses —
+    # is one line, not one per poll: forty identical lines before breakfast is how a
+    # log stops being read.
+    said: list[str] = []
+
+    def say_once(message: str) -> None:
+        if not said or said[-1] != message:
+            said.append(message)
+            say(message)
+
     say(f"keeper: watching {host}:{port} - the gateway runs as {sys.executable}")
     wait = restart_seconds
+    wedged_since: float | None = None
     while not stop.is_set():
         if ports.live_gateway(port) is not None:
+            wedged_since = None
             stop.wait(poll_seconds)
             continue
-        if ports.port_in_use(port, host):
-            # Something that is not this gateway answers there — a launch of the
-            # person's own, or a straggler still bound. Taking the port would be a
-            # fight with a process we do not own, so wait for it to go instead.
-            say(f"keeper: {host}:{port} is held by another process; leaving it alone")
+        held = ports.holder(port)
+        if held is not None:
+            pid = held.get("pid")
+            if pid is not None and own_gateway(held):
+                # Ours, and not answering: either it is still booting or it is wedged.
+                # Waiting on it forever leaves the room dark behind a port nobody can
+                # free, so after a boot's worth of silence the keeper replaces it.
+                if wedged_since is None:
+                    wedged_since = time.time()
+                silent = time.time() - wedged_since
+                if silent >= wedged_seconds:
+                    say(f"keeper: the gateway on {host}:{port} has not answered for {silent:.0f}s (pid {pid}); replacing it")
+                    if not stop_process(pid):
+                        say(f"keeper: pid {pid} did not stop; leaving the port to it")
+                        stop.wait(poll_seconds)
+                        continue
+                    wedged_since = None
+                    said.clear()
+                    stop.wait(1.0)
+                    continue
+                say_once(f"keeper: {host}:{port} is held by a gateway that is not answering yet (pid {pid}); waiting for it")
+                stop.wait(poll_seconds)
+                continue
+            say_once(_holder_line(host, port, held))
             stop.wait(poll_seconds)
             continue
+        refusal = ports.bind_blocker(port, host)
+        if refusal is not None:
+            reason = BIND_REFUSALS.get(refusal, refusal)
+            say_once(f"keeper: cannot listen on {host}:{port}: {reason}; the room stays down until that changes")
+            stop.wait(poll_seconds)
+            continue
+        wedged_since = None
+        said.clear()
         started = time.time()
         try:
             child = spawn(gateway_command(port, host))
