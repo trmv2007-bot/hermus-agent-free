@@ -854,17 +854,31 @@ def run(
         except Exception as e:  # noqa: BLE001 - setup must finish even if this cannot
             print(f"First run skipped (non-fatal): {type(e).__name__}: {e}")
     # Best-effort autostart: a fresh, healthy machine comes up by itself at logon.
-    # This creates the entries and proves them instead of printing a command to
-    # run later, and undoes an entry that does not answer rather than leaving a
-    # task that fails at every logon. Never fatal, never prints READY, skipped in
-    # verify-only mode (which must not change the machine).
+    # On Windows this creates the entries and proves them instead of printing a
+    # command to run later, and undoes an entry that does not answer rather than
+    # leaving a task that fails at every logon. Elsewhere `hermus sentinel install`
+    # still owns the platform's own shape (systemd unit, Termux boot script, cron
+    # line) and is called for it, so the services other platforms already wrote stay
+    # written. Never fatal, never prints READY, skipped in verify-only mode (which
+    # must not change the machine).
     if not verify_only and not os.environ.get("HERMUS_SKIP_AUTOSTART") and report.get("overall", {}).get("required"):
         try:
             from core import autostart
 
-            for result in autostart.install_all(root=ROOT, python=vdir_python or sys.executable):
-                for line in result.lines:
-                    print("Autostart: " + line)
+            if os.name == "nt":
+                for result in autostart.install_all(root=ROOT, python=vdir_python or sys.executable):
+                    for line in result.lines:
+                        print("Autostart: " + line)
+            else:
+                _r = subprocess.run(
+                    [vdir_python or sys.executable, str(ROOT / "hermus.py"), "sentinel", "install"],
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                    check=False,
+                )
+                _lines = [ln for ln in ((_r.stdout or "") + (_r.stderr or "")).splitlines() if ln.strip()]
+                print("Autostart: " + ("; ".join(_lines[-2:]) if _lines else "no output"))
         except Exception as e:  # noqa: BLE001 - setup must finish even if this cannot
             print(f"Autostart skipped (non-fatal): {type(e).__name__}: {e}")
     return 0 if report.get("overall", {}).get("required") else 1

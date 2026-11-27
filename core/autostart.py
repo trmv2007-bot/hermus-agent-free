@@ -104,10 +104,21 @@ class InstallResult:
 
 
 def default_port() -> int:
+    """The port the room serves on, from the same place the gateway reads it.
+
+    A launcher that starts the room on 8000 while the rest of the product thinks
+    the port is ``HERMUS_GATEWAY_PORT`` is a room nobody can find, so this asks
+    the gateway's own configuration first and only then the environment.
+    """
     try:
-        return int(os.environ.get("HERMUS_GATEWAY_PORT") or DEFAULT_PORT)
-    except ValueError:
-        return DEFAULT_PORT
+        from core.config import config
+
+        return int(config.gateway_port)
+    except Exception:  # noqa: BLE001 - a probe must not fail over its own port number
+        try:
+            return int(os.environ.get("HERMUS_GATEWAY_PORT") or DEFAULT_PORT)
+        except ValueError:
+            return DEFAULT_PORT
 
 
 def launcher_dir() -> Path:
@@ -343,26 +354,37 @@ def _facts(output: str) -> dict[str, str]:
     return facts
 
 
-def _get_json(url: str, opener: Any) -> tuple[dict | None, str]:
-    """``(body, error)`` for one request; a JSON error answer still counts as an answer."""
+def _get_json(url: str, opener: Any) -> tuple[dict | None, str, int]:
+    """``(body, error, http_code)`` for one request; a JSON error answer is still an answer."""
     try:
         with opener(url, timeout=REQUEST_SECONDS) as response:
             body = json.loads(response.read().decode("utf-8", "replace"))
+            code = int(getattr(response, "status", 200) or 200)
     except urllib.error.HTTPError as exc:
         # /readyz answers 503 while it is warming up, and that is still the room
         # talking: only silence means it is not up.
         try:
             body = json.loads(exc.read().decode("utf-8", "replace"))
         except (OSError, ValueError):
-            return None, f"HTTP {exc.code}"
-        return (body if isinstance(body, dict) else None), f"HTTP {exc.code}"
+            return None, f"HTTP {exc.code}", exc.code
+        return (body if isinstance(body, dict) else None), f"HTTP {exc.code}", exc.code
     except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
-        return None, str(exc) or type(exc).__name__
-    return (body if isinstance(body, dict) else None), ""
+        return None, str(exc) or type(exc).__name__, 0
+    return (body if isinstance(body, dict) else None), "", code
+
+
+def _is_health(body: dict | None) -> bool:
+    """Is this Hermes's own ``/healthz``? The identity check, not the readiness one.
+
+    Any JSON on the port is not the room: another service answering there with a
+    JSON body would otherwise pass for a gateway, while the keeper waited because
+    the port was somebody else's.
+    """
+    return isinstance(body, dict) and body.get("success") is True and body.get("status") == "ok" and "pid" in body
 
 
 def probe_ready(
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     *,
     timeout: float = PROBE_SECONDS,
     interval: float = 1.0,
@@ -370,21 +392,31 @@ def probe_ready(
     sleep: Any = time.sleep,
 ) -> dict[str, Any]:
     """Wait for the room to answer ``/readyz`` on loopback; report the pid that does."""
+    port = port or default_port()
     opener = opener or urllib.request.urlopen
     deadline = time.time() + timeout
     last = "nothing answered"
     while True:
         for host, base in ((LOOPBACK, f"http://{LOOPBACK}:{port}"), ("::1", f"http://[::1]:{port}")):
-            body, error = _get_json(f"{base}/readyz", opener)
-            if body is not None:
-                health, _ = _get_json(f"{base}/healthz", opener)
-                return {
-                    "ok": True,
-                    "status": str(body.get("status") or "answered"),
-                    "pid": (health or {}).get("pid") or body.get("pid"),
-                    "detail": f"/readyz {body.get('status') or 'answered'} on {host}:{port}",
-                }
-            last = error or last
+            body, error, code = _get_json(f"{base}/readyz", opener)
+            if code in (200, 503) and isinstance(body, dict):
+                # /readyz answers 503 while it is warming up, which is still the
+                # room talking — but only Hermes's own /healthz, with a pid, makes
+                # it *this* room rather than whatever else holds the port.
+                health, _, health_code = _get_json(f"{base}/healthz", opener)
+                if health_code == 200 and _is_health(health):
+                    status = str(body.get("status") or ("ready" if code == 200 else "not_ready"))
+                    return {
+                        "ok": True,
+                        "status": status,
+                        "pid": health.get("pid"),
+                        "detail": f"/readyz {status} on {host}:{port}",
+                    }
+                last = f"{host}:{port} answers /readyz but /healthz is not this room"
+            elif error:
+                last = error
+            elif code:
+                last = f"HTTP {code} on {host}:{port} is not this room's /readyz"
         if time.time() >= deadline:
             return {
                 "ok": False,
@@ -432,18 +464,19 @@ def find_processes(needle: str) -> list[int]:
     return found
 
 
-def stop_processes(needle: str, *, wait: float = 5.0) -> list[int]:
+def stop_processes(needle: str, *, exclude: Any = (), wait: float = 5.0) -> list[int]:
     """End the process a just-installed task started, and its children.
 
     Only ever called by an install that is undoing itself, and only for the
-    process whose command line names this checkout: the room serving somebody
-    else's port is not ours to end.
+    process whose command line names this checkout. ``exclude`` is the set of
+    pids that already matched before this install began: a keeper that was
+    serving before is not this install's to end, even when the probe failed.
     """
     try:
         import psutil
     except ImportError:
         return []
-    family = _family()
+    family = _family() | {int(pid) for pid in exclude or ()}
     stopped: list[int] = []
     for proc in psutil.process_iter(["pid", "cmdline"]):
         try:
@@ -474,7 +507,7 @@ def install(
     *,
     root: Path,
     python: Path | None = None,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     timeout: float = PROBE_SECONDS,
     run: Any = None,
     probe: Any = None,
@@ -491,6 +524,7 @@ def install(
     """
     root = Path(root).resolve()
     python = Path(python) if python else Path(sys.executable)
+    port = port or default_port()
     probe = probe or probe_ready
     find = find or find_processes
     stop = stop or stop_processes
@@ -502,6 +536,10 @@ def install(
         )
 
     path = launcher_path(entry)
+    needle = f"{root / 'hermus.py'} {entry.marker}"
+    # What was already running before this install: a keeper that was serving
+    # before is not this install's to end, even when its own probe fails.
+    preexisting = set(find(needle))
     previous = path.read_bytes() if path.is_file() else None
     write_launcher(entry, root, python, port)
     backup = launcher_dir() / "backups" / f"{entry.task_name}-{time.strftime('%Y%m%dT%H%M%S')}.xml"
@@ -539,14 +577,17 @@ def install(
                 f"launcher: {path}",
             ]
         else:
+            # The elevated command points at this launcher, so the launcher stays:
+            # deleting it would hand the person a command that registers a task
+            # running a file that is not there.
             if previous is not None:
                 path.write_bytes(previous)
-            else:
-                path.unlink(missing_ok=True)
             result.lines = [
                 f"task \\{entry.task_name}: NOT created - {reason}",
-                "  nothing was created, so nothing fails at every logon; a task that was already there is unchanged",
-                f"  if this account needs elevation for a logon task, run once in an elevated shell: {elevated_command(entry, path)}",
+                "  nothing was scheduled, so nothing fails at every logon; a task that was already there is unchanged",
+                f"  the launcher is in place at {path}",
+                f"  register it once in an elevated shell: {elevated_command(entry, path)}",
+                f"  or re-run the installer elevated: {python} {root / 'hermus.py'} sentinel install",
             ]
             return result
 
@@ -556,7 +597,6 @@ def install(
             f"launcher: {path}",
         ]
 
-    needle = f"{root / 'hermus.py'} {entry.marker}"
     if entry is GATEWAY:
         answer = probe(port, timeout=timeout)
         up, detail, pid = bool(answer.get("ok")), str(answer.get("detail") or ""), answer.get("pid")
@@ -580,7 +620,18 @@ def install(
 
     result.lines.append(f"room: {detail}")
     if kept:
-        result.lines.append(f"task \\{entry.task_name}: left exactly as it was - this install did not create or change it")
+        # The item is still the task's action, so it must keep pointing at
+        # something that starts: restore what was there, and only fall back to
+        # leaving this one when there was nothing to restore.
+        if previous is not None:
+            path.write_bytes(previous)
+            result.lines.append(
+                f"task \\{entry.task_name}: left exactly as it was, launcher restored - this install did not create or change it"
+            )
+        else:
+            result.lines.append(
+                f"task \\{entry.task_name}: left exactly as it was; its launcher now points at {root}, which did not answer"
+            )
         return result
     undone = _powershell(rollback_script(entry, backup=backup if backup.is_file() else None), run=run)
     undo = _facts((undone.stdout or "") + "\n" + (undone.stderr or ""))
@@ -588,7 +639,7 @@ def install(
         path.write_bytes(previous)
     else:
         path.unlink(missing_ok=True)
-    ended = stop(needle)
+    ended = stop(needle, exclude=preexisting)
     if undo.get("restored"):
         state = f"task \\{entry.task_name} put back to what it was"
     elif undo.get("removed") not in (None, "none"):
@@ -608,7 +659,7 @@ def install_all(
     *,
     root: Path,
     python: Path | None = None,
-    port: int = DEFAULT_PORT,
+    port: int | None = None,
     timeout: float = PROBE_SECONDS,
     run: Any = None,
     probe: Any = None,
@@ -618,6 +669,7 @@ def install_all(
     platform: str | None = None,
 ) -> list[InstallResult]:
     """Both entries a fresh install owns: the room, then the sentinel."""
+    port = port or default_port()
     return [
         install(
             entry,

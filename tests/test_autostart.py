@@ -135,7 +135,7 @@ def test_install_reports_what_it_created_and_the_pid_serving(profile, root):
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": True, "pid": 9020, "detail": "/readyz ready on 127.0.0.1:8000"},
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     assert result.ok
     assert result.task_name == "Hermes_Gateway"
@@ -180,7 +180,7 @@ def test_a_room_that_never_answers_is_reported_and_undone(profile, root):
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": False, "pid": None, "detail": "/readyz did not answer (refused)"},
-        stop=lambda needle: stopped.append(needle) or [],
+        stop=lambda needle, exclude=(): stopped.append((needle, set(exclude))) or [],
     )
     text = "\n".join(result.lines)
     assert not result.ok
@@ -189,7 +189,7 @@ def test_a_room_that_never_answers_is_reported_and_undone(profile, root):
     assert "half-installed" in text
     assert any("Unregister-ScheduledTask" in call for call in powershell.calls)
     assert not autostart.launcher_path(autostart.GATEWAY).exists(), "an entry that failed leaves no launcher behind"
-    assert stopped == [f"{root.resolve() / 'hermus.py'} gateway service"], "the process it started is ours to end"
+    assert stopped == [(f"{root.resolve() / 'hermus.py'} gateway service", set())], "the process it started is ours to end"
 
 
 def test_a_failed_probe_puts_back_the_task_that_was_there(profile, root):
@@ -204,7 +204,7 @@ def test_a_failed_probe_puts_back_the_task_that_was_there(profile, root):
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": False, "pid": None, "detail": "/readyz did not answer"},
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     assert not result.ok
     undo = [call for call in powershell.calls if "Register-ScheduledTask -TaskName $name -Xml" in call]
@@ -224,7 +224,7 @@ def test_a_refused_registration_says_what_was_not_done(profile, root):
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": False, "pid": None, "detail": "should never be reached"},
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     text = "\n".join(result.lines)
     assert not result.ok
@@ -233,7 +233,8 @@ def test_a_refused_registration_says_what_was_not_done(profile, root):
     assert "installed" not in text.lower().replace("installed;", "")
     assert len(powershell.calls) == 2, "the register attempt, then a look at what is already there"
     assert "SilentlyContinue" in powershell.calls[1], "a refusal is followed by a look, not by an undo"
-    assert not autostart.launcher_path(autostart.GATEWAY).exists()
+    assert autostart.launcher_path(autostart.GATEWAY).is_file(), "the command it prints must point at a file that exists"
+    assert "the launcher is in place" in text
     assert "room:" not in text, "a refused entry was never started, so it cannot claim to serve"
 
 
@@ -255,7 +256,7 @@ def test_a_task_it_may_not_replace_is_kept_when_it_already_runs_the_launcher(pro
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": True, "pid": 5150, "detail": "/readyz ready on 127.0.0.1:8000"},
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     text = "\n".join(result.lines)
     assert result.ok
@@ -285,7 +286,7 @@ def test_a_kept_task_is_not_undone_when_the_room_stays_dark(profile, root):
         platform="nt",
         run=powershell,
         probe=lambda port, timeout: {"ok": False, "pid": None, "detail": "/readyz did not answer"},
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     assert not result.ok
     assert "left exactly as it was" in "\n".join(result.lines)
@@ -309,7 +310,7 @@ def test_sentinel_install_proves_the_process_is_running(profile, root):
         run=FakePowerShell(),
         find=find,
         sleep=lambda seconds: None,
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
     )
     assert result.ok
     assert "pid 4242" in "\n".join(result.lines)
@@ -326,7 +327,7 @@ def test_sentinel_that_never_starts_is_reported_and_undone(profile, root):
         run=FakePowerShell(lambda script: (0, "HERMUS_TASK removed=Hermes_Sentinel\n", "")),
         find=lambda needle: [],
         sleep=lambda seconds: called.append("slept"),
-        stop=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
         timeout=0,
     )
     assert not result.ok
@@ -347,10 +348,10 @@ class _Room(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/healthz":
-            body = {"status": "ok", "pid": 4321}
+            body = {"success": True, "status": "ok", "pid": 4321}
             self.send_response(200)
         else:
-            body = {"status": "ready", "reasons": []}
+            body = {"status": "ready", "ready": True, "reasons": []}
             self.send_response(200 if self.answered else 503)
         payload = json.dumps(body).encode()
         self.send_header("Content-Type", "application/json")
@@ -386,6 +387,81 @@ def test_probe_reports_silence_as_failure(profile):
     assert not answer["ok"]
     assert answer["pid"] is None
     assert "did not answer" in answer["detail"]
+
+
+def test_a_keeper_that_was_already_running_is_not_stopped_by_a_failed_install(profile, root):
+    seen: dict[str, object] = {}
+
+    def stop(needle: str, exclude=()):
+        seen["needle"] = needle
+        seen["exclude"] = set(exclude)
+        return []
+
+    result = autostart.install(
+        autostart.GATEWAY,
+        root=root,
+        python=root / "python.exe",
+        platform="nt",
+        run=FakePowerShell(lambda script: (0, "HERMUS_TASK removed=Hermes_Gateway\n", "")),
+        probe=lambda port, timeout: {"ok": False, "pid": None, "detail": "/readyz did not answer"},
+        find=lambda needle: [4242],
+        stop=stop,
+    )
+    assert not result.ok
+    assert seen["exclude"] == {4242}, "a room that was already serving is not this install's to end"
+
+
+def test_a_foreign_json_api_on_the_port_is_not_the_room(profile):
+    class Foreign(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps({"detail": "Not Found"}).encode()
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Foreign)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        answer = autostart.probe_ready(server.server_address[1], timeout=0.3, interval=0.1)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert not answer["ok"], "any JSON on the port is not the room; the keeper would have left it alone"
+    assert "did not answer" in answer["detail"]
+
+
+def test_the_default_port_is_the_one_the_gateway_itself_reads(profile):
+    from core.config import config
+
+    assert autostart.default_port() == int(config.gateway_port)
+
+
+def test_install_serves_and_probes_the_port_it_is_given(profile, root):
+    probed: list[int] = []
+
+    def probe(port, timeout):
+        probed.append(port)
+        return {"ok": True, "pid": 11, "detail": "/readyz ready"}
+
+    result = autostart.install(
+        autostart.GATEWAY,
+        root=root,
+        python=root / "python.exe",
+        port=9123,
+        platform="nt",
+        run=FakePowerShell(),
+        probe=probe,
+        stop=lambda needle, exclude=(): [],
+    )
+    assert result.ok
+    assert probed == [9123], "the probe must ask the port the launcher will serve"
+    assert "--port 9123" in autostart.launcher_path(autostart.GATEWAY).read_text(encoding="ascii")
 
 
 def test_install_all_owns_the_room_and_the_sentinel(profile, root):
