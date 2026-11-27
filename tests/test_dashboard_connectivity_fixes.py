@@ -70,7 +70,7 @@ def test_command_multipart_attachment_reaches_prompt(client):
     assert "Attachment: notes.txt" in prompt
 
 
-def test_command_multipart_attachment_e2e_mock(client):
+def test_command_multipart_attachment_e2e_mock(client, no_model_backend):
     """End-to-end via the offline mock: attachment block appears in the echo
     when the default Ollama fallback is active."""
     files = {"files": ("n.txt", b"MKR42 answer", "text/plain")}

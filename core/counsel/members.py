@@ -57,12 +57,25 @@ def _discover_workers() -> list[dict]:
 
 
 def _assign_models(specs: list[dict], model: str | None = None) -> list[dict]:
-    """Assign diverse model refs to member specs; fall back to `model` or config.model."""
-    workers = _discover_workers()
+    """Assign model refs to member specs.
+
+    An explicitly requested model wins for every member. A caller that names a
+    model (a mission stage, the CLI's ``--model``, a test's mock) asked for that
+    model, and fleet discovery is a convenience for an unpinned council, never
+    an override: overriding it silently ran a ``mock/mock`` session against real
+    local models, including a vision model.
+    """
+    workers = [] if model else _discover_workers()
     used_providers = set()
     assigned = []
     for spec in specs:
         s = dict(spec)
+        if model:
+            s["model"] = model
+            s["api_key"] = ""
+            s["base_url"] = ""
+            assigned.append(s)
+            continue
         pinned = s.get("model")
         if pinned:
             s["model"] = pinned

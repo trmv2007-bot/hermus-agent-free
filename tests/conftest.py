@@ -50,6 +50,46 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         refuse_real_home(data_dir, "HERMUS_DATA_DIR")
 
 
+@pytest.fixture()
+def no_model_backend(monkeypatch):
+    """Make "there is no model backend" true instead of inherited.
+
+    Several tests pin the honest no-backend contract: a mission reports the
+    blocker instead of faking work, and a turn still answers. On the machine
+    this product is developed on, Ollama is usually running, so the same code
+    path ran a real inference and the test measured the developer's PC instead
+    of the contract. A closed port makes the precondition explicit and
+    machine-independent; the empty key store above finishes the job.
+    """
+    from core.config import config
+
+    monkeypatch.setattr(config, "ollama_base_url", "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "nollama_port", 1)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_permission_policy(tmp_path_factory, monkeypatch):
+    """Every test gets its own tool policy, in memory and on disk.
+
+    The policy store outlives a test: an onboarding profile or a granted approval
+    written by one test was read by the next in the same process, which then saw
+    `web_search` denied or `credential_access` allowed. Eleven tests failed in a
+    full run and passed alone for exactly this reason.
+
+    The store lives in its own directory rather than the test's `tmp_path`, so a
+    test that asserts what it wrote there still sees only its own files.
+    """
+    from core.approval import ApprovalStore
+    from core.permissions import permission_manager
+
+    store = tmp_path_factory.mktemp("policy")
+    monkeypatch.setattr(permission_manager, "overrides_path", store / "permissions.json", raising=False)
+    monkeypatch.setattr(
+        permission_manager, "overrides", {"tools": {}, "agents": {}, "allowlist": [], "denylist": []}, raising=False
+    )
+    monkeypatch.setattr(permission_manager, "approvals", ApprovalStore(store / "approval_grants.json"), raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _no_key_store(monkeypatch):
     """No test may read a key that belongs to whoever's machine it runs on.

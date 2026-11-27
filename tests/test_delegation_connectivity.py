@@ -90,10 +90,24 @@ def test_delegation_connects_queue_to_canonical_boundaries_and_event_bus():
 
         bus.subscribe("job.lifecycle")(collect)
 
+        # The sub-agent's model picks a search tool, and a real search took 16 s
+        # a step inside a 30 s budget, so the whole delegation timed out when the
+        # network was slow. The delegation path is what this test measures, so
+        # the tool returns a canned result through the same gateway.
+        from core.tool_registry import tool_registry
+
+        tool_registry.load()
+        canned_search = {
+            "results": [
+                {"title": "Clustering", "href": "https://example.invalid/k", "snippet": "k-means is a partitional method"}
+            ]
+        }
+
         with (
             mock.patch.object(type(gw), "llm", tr_llm),
             mock.patch.object(type(tg), "execute", tr_exec),
             mock.patch.object(MemoryFacade, "recall_context", tr_recall),
+            mock.patch.dict(tool_registry.executors, {"web_search": lambda **kw: canned_search}),
         ):
             st = submit_and_wait(
                 DELEGATE_JOB,

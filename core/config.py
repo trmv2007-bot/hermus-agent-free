@@ -217,6 +217,10 @@ class Config(BaseSettings):
     counsel_min_difficulty: int = Field(default=4, validation_alias="HERMUS_COUNSEL_MIN_DIFFICULTY")
     counsel_max_members: int = Field(default=6, validation_alias="HERMUS_COUNSEL_MAX_MEMBERS")
     counsel_max_rounds: int = Field(default=3, validation_alias="HERMUS_COUNSEL_MAX_ROUNDS")
+    # A council multiplies a turn (members × rounds × fallback rungs), so it
+    # carries a wall-clock budget of its own and finishes with the work it has
+    # instead of holding the turn open for hours.
+    counsel_timeout: float = Field(default=240.0, validation_alias="HERMUS_COUNSEL_TIMEOUT")
     # Meta-Counsel reviews each session and proposes self-upgrades
     counsel_auto_review: EnvFlag = Field(default=True, validation_alias="HERMUS_COUNSEL_AUTO_REVIEW")
 
@@ -546,10 +550,26 @@ class Config(BaseSettings):
         # Find project root (where this file's parent's parent has README)
         return Path(__file__).parent.parent
 
+    @property
+    def data_dir(self) -> Path:
+        """Root of the ``data/`` tree, honouring ``HERMUS_DATA_DIR``.
+
+        The variable is documented (docs/DEVELOPERS.md, ARCHITECTURE_INVENTORY)
+        as the way to point a run at a scratch folder, and a few modules already
+        read it directly. ``resolve_path`` did not, so a test run with an
+        isolated home still wrote every ``data/…`` record into the checkout and
+        read the previous run's state back — which is how a whole suite could
+        pass file by file and fail as one process.
+        """
+        raw = (os.environ.get("HERMUS_DATA_DIR") or "").strip()
+        return Path(raw) if raw else self.base_dir / "data"
+
     def resolve_path(self, p: str) -> Path:
         path = Path(p)
         if path.is_absolute():
             return path
+        if path.parts and path.parts[0] == "data":
+            return self.data_dir.joinpath(*path.parts[1:])
         return self.base_dir / path
 
 

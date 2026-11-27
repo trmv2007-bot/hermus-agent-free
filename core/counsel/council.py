@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime
 
 from core.log import get_logger
@@ -53,6 +55,7 @@ class CouncilSession:
         max_members: int | None = None,
         max_rounds: int | None = None,
         execute: bool = True,
+        timeout_seconds: float | None = None,
     ):
         self.goal = (goal or "").strip()
         if not self.goal:
@@ -64,6 +67,14 @@ class CouncilSession:
         self.max_members = max_members or max(3, budget["max_members"])
         self.max_rounds = max_rounds or budget["max_rounds"]
         self.execute_plan_flag = execute
+        # The budget that makes a council a bounded part of a turn. Every model
+        # call has its own socket timeout, but members × rounds × fallback rungs
+        # multiply into hours, and a turn the person is waiting on must end.
+        self.timeout_seconds = float(
+            timeout_seconds if timeout_seconds is not None else getattr(config, "counsel_timeout", 240.0)
+        )
+        self.deadline = time.monotonic() + self.timeout_seconds
+        self.timed_out = False
         self.doc = constitution.load()
         self.members: list[CounselMember] = []
         self.debaters: list[CounselMember] = []
@@ -124,6 +135,21 @@ class CouncilSession:
 
     # ---------------------------------------------------------------- lifecycle
 
+    def _remaining(self) -> float:
+        return max(0.0, self.deadline - time.monotonic())
+
+    def _out_of_time(self) -> bool:
+        """Whether the council's wall-clock budget is spent (records it once)."""
+        if self._remaining() > 0:
+            return False
+        if not self.timed_out:
+            self.timed_out = True
+            logger.warning(f"[⚖️ Counsel] budget of {self.timeout_seconds:.0f}s spent; finishing with what it has")
+            self._add_turn(
+                "system", f"Council budget of {self.timeout_seconds:.0f}s spent; finishing with the work completed so far."
+            )
+        return True
+
     def run(self) -> dict:
         """Full council lifecycle. Returns a summary dict (never raises)."""
         try:
@@ -134,16 +160,22 @@ class CouncilSession:
 
             self.convene()
             self.proposals()
-            self.deliberate()
-            self.vote()
-            self.finalize_plan()
-            if self.execute_plan_flag:
+            if not self._out_of_time():
+                self.deliberate()
+            if not self._out_of_time():
+                self.vote()
+            if not self._out_of_time():
+                self.finalize_plan()
+            if self.execute_plan_flag and not self._out_of_time():
                 self.execute()
+            # One synthesis call, even when the budget is gone: the turn still
+            # owes the person an answer, made of whatever the council produced.
             self.synthesize()
             self.save()
 
             summary = self.summary()
-            self._maybe_review(summary)
+            if not self.timed_out:
+                self._maybe_review(summary)
             return summary
         except Exception as e:
             self.errors.append(str(e))
@@ -248,7 +280,12 @@ class CouncilSession:
         return [{"role": "system", "content": system}]
 
     def proposals(self):
-        """Round 1: every debater drafts its approach in parallel."""
+        """Round 1: every debater drafts its approach in parallel.
+
+        Bounded by the council's remaining budget: a member whose model is still
+        generating when the clock runs out is recorded as timed out instead of
+        holding the whole council (and the turn behind it) open.
+        """
         logger.info(f"[⚖️ Counsel] Proposals from {len(self.debaters)} members (parallel)...")
 
         def draft(m: CounselMember) -> dict:
@@ -264,15 +301,25 @@ class CouncilSession:
             except Exception as e:
                 return {"member": m.name, "role": m.role, "content": f"(proposal failed: {e})"}
 
-        with ThreadPoolExecutor(max_workers=max(2, len(self.debaters))) as ex:
-            futures = [ex.submit(draft, m) for m in self.debaters]
-            for f in as_completed(futures):
+        ex = ThreadPoolExecutor(max_workers=max(2, len(self.debaters)))
+        futures = {ex.submit(draft, m): m for m in self.debaters}
+        try:
+            for f in as_completed(futures, timeout=self._remaining()):
                 r = f.result()
                 self.proposal_texts[r["member"]] = r["content"]
                 self._add_turn(
                     r["member"], r["content"], round_num=1, extra={"role": r["role"], "model": self._model_for(r["member"])}
                 )
                 logger.info(f"\n[👤 {r['member']}] {r['content'][:280]}...")
+        except FuturesTimeout:
+            self._out_of_time()
+            for f, m in futures.items():
+                if not f.done():
+                    self.proposal_texts.setdefault(m.name, f"({m.name} did not answer within the council budget)")
+        finally:
+            # Never wait on a member that is still generating: `run` promised to
+            # be bounded, and ThreadPoolExecutor.__exit__ joins every worker.
+            ex.shutdown(wait=False, cancel_futures=True)
 
     def _model_for(self, name: str) -> str:
         for m in self.members:
@@ -285,9 +332,13 @@ class CouncilSession:
         if self.max_rounds < 2 or len(self.debaters) < 2:
             return
         for round_num in range(2, self.max_rounds + 1):
+            if self._out_of_time():
+                return
             logger.info(f"\n[⚖️ Counsel] Deliberation round {round_num}/{self.max_rounds}")
             self._track(f"Deliberation round {round_num}/{self.max_rounds}")
             for member in self.debaters:
+                if self._out_of_time():
+                    return
                 history = self._recent_transcript_text(limit=8)
                 critic_rule = ""
                 if member.role == "critic" and self.rules.get("critic_must_attach_evidence", True):
@@ -474,6 +525,8 @@ class CouncilSession:
         tool_rounds_cap = int(self.budget_doc.get("execution_tool_rounds_per_step", 3))
 
         for idx, step in enumerate(self.plan.steps):
+            if self._out_of_time():
+                break
             step.status = "active"
             # Per-step tool selection. The full catalog is ~18.3K tokens and this
             # call happens once per step *per tool round*, so sending everything
@@ -615,7 +668,7 @@ class CouncilSession:
             )
             or "(no execution)"
         )
-        if synth:
+        if synth and not self._out_of_time():
             messages = [
                 {
                     "role": "system",
@@ -679,6 +732,7 @@ class CouncilSession:
             "plan": self.plan.to_dict() if self.plan else None,
             "step_results": self.step_results,
             "replanned": self.replanned,
+            "timed_out": self.timed_out,
             "final_answer": self.final_answer[:4000],
             "transcript_turns": len(self.transcript),
             "errors": self.errors,

@@ -1550,3 +1550,59 @@ not die not started over, one false positive costing one poll, a machine refusal
 itself, and a real process tree stopped by `stop_process`. `tests/test_gateway_start_guard.py`
 gains four: the holder named with what the OS knows, a free port with no holder, a table row
 for a reaped process not read as a holder, and the bind refusal arriving unadorned.
+
+## An autonomous turn can no longer hang, and one suite run finishes
+
+The suite could not finish on this PC, and three of the hangs were `POST /command` calls
+that never returned. Thread dumps taken under `faulthandler` say none of them was the POST
+itself: the request was answered, and the turn behind it never ended.
+
+- **The council ignored the model it was given.** `POST /command` with `async` +
+  `autonomous` ran `mission → agent.chat → CouncilSession.run → proposals →
+  as_completed`, while a member thread sat in `core/llm.py::_call_ollama →
+  openai_compat.chat_completions → requests.post → socket.readinto`. The members were
+  never the requested model: `_assign_models` overwrote it with fleet-discovered workers,
+  which on this machine meant a vision model and a tag whose namespace had been dropped
+  (`SparkLLM/Spark-X2.6-4B:q4_k_m` → `Spark-X2.6-4B:q4_k_m`, a 404 on every call). An
+  explicitly requested model now wins for every member, and `FreeLLM` only strips a
+  leading segment that is the provider.
+- **A council had no wall clock.** Every model call had a 120 s socket timeout, but
+  members × rounds × fallback rungs × mission nodes multiply into hours, and
+  `ThreadPoolExecutor.__exit__` joined every stalled member. `CouncilSession` now carries
+  a budget (`HERMUS_COUNSEL_TIMEOUT`, 240 s), stops between phases and steps when it is
+  spent, records that in the transcript and in `timed_out`, and still answers with what it
+  has instead of returning nothing.
+- **An inline turn had no bound at all.** The queued path already enforced
+  `gateway_queue_timeout`; the inline `POST /command` awaited the whole turn forever. It
+  now shares that budget and answers `504` with a sentence saying the turn was stopped,
+  so a person sees a failure instead of a spinner that never resolves.
+- **"Ollama is up" was read as "the model exists".** `_backend_available` only asked
+  whether `/api/tags` answered, so a mission spent its rounds walking 404s for a model
+  that was never pulled. It now checks the requested model is in the listing (bare names
+  normalising to `:latest`), so the mission reports the honest blocker immediately.
+
+Twelve tests failed in one process and passed alone, all of them reading state an
+earlier test left behind: the tool policy store (an onboarding test applied the `watch`
+profile and never put it back), `HERMUS_DATA_DIR` (documented as the isolation knob, but
+`config.resolve_path("data/…")` ignored it and wrote into the checkout), a process-wide
+`HERMUS_MODEL` pin, and a delegation test that ran real web searches inside a 30 s budget.
+The policy store is now per test, `resolve_path` honours `HERMUS_DATA_DIR`, and those tests
+state their own preconditions.
+
+Three endpoint tests asserted the no-model-backend contract while inheriting the
+developer's machine: on a PC with Ollama running they exercised a real inference. They
+take a `no_model_backend` fixture (a closed port plus the empty key store the suite
+already installs) so the precondition is explicit.
+
+**Verification**, all on this PC with an isolated `HERMUS_HOME` per batch:
+
+- The four hanging tests, run together: `4 passed in 24.34s` (previously each of the three
+  `/command` ones sat in Ollama until killed).
+- `tests/test_turn_bounds.py` (new, 7 tests): a 0.6 s council budget ends a session whose
+  members sleep 2 s and still produces an answer; a healthy session is not shortened; an
+  inline turn past its budget answers 504 with `timeout: true`; the model-presence check
+  accepts `llama3.1` against `llama3.1:latest` and rejects a stripped namespace; a
+  namespaced tag survives the provider split; an explicit model reaches every member.
+- `pytest -q --ignore=tests/browser` completes in one invocation: **2214 passed, 12
+  skipped** in 738.83 s (12m18s), exit 0, no hang — and the process exits on its own,
+  where before it printed its last line and sat for seventeen minutes.

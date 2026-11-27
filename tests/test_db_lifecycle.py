@@ -163,7 +163,7 @@ def test_no_resource_warning_after_shutdown(tmp_path):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
         gc.collect()
-    leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning) and "leak.db" in str(w.message)]
     assert not leaked, leaked
 
 

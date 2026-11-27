@@ -17,7 +17,8 @@ def test_singleton_exposes_all_settings():
     # (model fleet / voice ack / personal-space knobs) without refreshing this pin.
     # 202 → 206: the thinking layer added thinking_enabled,
     # thinking_routing_enabled, route_tier and thinking_repair_enabled.
-    assert len(Config.model_fields) == 206
+    # 206 → 207: an autonomous turn's council budget (counsel_timeout).
+    assert len(Config.model_fields) == 207
     assert {
         "personal_space_enabled",
         "personal_space_state_path",

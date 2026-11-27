@@ -1241,7 +1241,24 @@ async def command_endpoint(request: Request):
                     out["streamed"] = True
             return out
 
-        result = await asyncio.to_thread(_run)
+        # One turn, one bound, whichever way it was submitted. The queued path
+        # already enforces `gateway_queue_timeout`; the inline path used to wait
+        # on the turn forever, so a slow or wedged model call left the POST (and
+        # the dashboard behind it) hanging with no answer and no error.
+        turn_timeout = float(getattr(config, "gateway_queue_timeout", 300.0) or 300.0)
+        try:
+            result = await asyncio.wait_for(asyncio.to_thread(_run), timeout=turn_timeout)
+        except (asyncio.TimeoutError, TimeoutError):
+            error = (
+                f"The turn exceeded its {turn_timeout:.0f}s budget and was stopped without an answer. "
+                "Check the model in Settings, or ask again once it is responding."
+            )
+            dashboard_event_bus.publish("session_failed", {"run_id": run_id, "error": error})
+            try:
+                _run_bus.finish(run_id, "error", None, error)
+            except Exception:
+                pass
+            return JSONResponse({"error": error, "run_id": run_id, "timeout": True}, status_code=504)
         # Normalize the answer contract: chat returns "response", autonomous
         # reports historically returned "final_answer" and missions use
         # "final_proof". Promote whichever exists to canonical "response" so the

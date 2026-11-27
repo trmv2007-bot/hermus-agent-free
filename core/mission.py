@@ -1038,6 +1038,12 @@ def make_agent_backed_executor(
                 _backend_ok = True
             if not _backend_ok:
                 _reason = "No model backend reachable (no Ollama and no API key). Configure a model before running missions."
+                # The fast check knows *why*: a local server that is up without
+                # the model is a different instruction to the person than one
+                # that is not running at all.
+                _detail = str(getattr(node_agent, "_backend_detail", "") or "")
+                if _detail:
+                    _reason = f"{_reason} {_detail}."
                 _emit("node_finished", {"stage": stage, "status": "blocked", "reason": _reason})
                 return {
                     "success": False,

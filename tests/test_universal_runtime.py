@@ -387,7 +387,7 @@ def test_command_async_submits_runtime_turn(client):
     assert "run_finished" in types
 
 
-def test_command_async_mission_autonomous(client):
+def test_command_async_mission_autonomous(client, no_model_backend):
     """/command?autonomous=true&async=true runs the mission runtime via the queue."""
     import time as _time
 
