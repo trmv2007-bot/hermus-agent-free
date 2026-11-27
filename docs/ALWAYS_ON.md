@@ -23,7 +23,8 @@ its red lines, learns from what it sees, and survives reboots:
                  │  AmbientLoop (passive observer) ◀───────────┘ attention.raised/cleared
                  │                                            │
                  └──────────────────────────────────────────────┘
-        bootstrap.py ──best-effort──▶ `hermus sentinel install` (autostart: systemd user unit / cron @reboot / Termux boot / Windows schtasks)
+        bootstrap.py ──best-effort──▶ autostart entries, created and proved (Windows: a per-user logon task
+                                      per entry; Linux: systemd user unit; Termux: boot script; else cron @reboot)
         gateway up  ──▶ sentinel thread inline (HERMUS_SENTINEL_WITH_GATEWAY=1)
         control room ──▶ GET /api/sentinel/{status,decisions,alerts,proposals} + live bus stream
 ```
@@ -49,7 +50,7 @@ hermus sentinel run            # daemon: inline on the EventBus
 hermus sentinel test           # fire a synthetic incident, watch it alert
 hermus sentinel status         # thresholds + counters
 hermus sentinel alerts         # tail data/sentinel/alerts.jsonl
-hermus sentinel install        # autostart entry (systemd / cron / Termux / schtasks)
+hermus sentinel install        # create the autostart entry and prove it runs (systemd / Termux / cron / logon task)
 ```
 
 Measure it: `hermus harness run sentinel --model mock/mock` (6 scripted
@@ -108,12 +109,21 @@ reports `total_tokens_est` / per-task `tokens_est` (estimated via
 
 ## 6. Wiring it everywhere
 
-- **Fresh machine:** `bootstrap.py` runs `hermus sentinel install`
-  best-effort (skip with `HERMUS_SKIP_AUTOSTART=1`) — systemd user unit where
-  available, `cron @reboot` on Termux, a Task Scheduler command on Windows.
+- **Fresh machine:** `bootstrap.py` *creates* the autostart entries (skip with
+  `HERMUS_SKIP_AUTOSTART=1`): on Windows a per-user logon task per entry — the
+  gateway keeper and the sentinel — registered through PowerShell's
+  ScheduledTasks module, which needs no elevation, plus a `.vbs` launcher at a
+  stable path in the user profile. It then starts the task and waits for
+  `/readyz` on loopback; an entry that does not come up is removed rather than
+  left failing at every logon. On Linux a systemd user unit, on Termux a boot
+  script, elsewhere a `cron @reboot` line. `core/autostart.py` is the one
+  implementation of all of it.
 - **Gateway:** with `HERMUS_SENTINEL_WITH_GATEWAY=1` (default) the gateway
   starts a sentinel thread inline at boot and drains it on shutdown; model via
   `HERMUS_SENTINEL_MODEL`.
+- **Stopping a Windows task is not stopping the room:** `schtasks /end /tn
+  "Hermes_Gateway"` ends the launcher, not the keeper it started, so the room
+  keeps serving. End the keeper's python process tree instead.
 - **Control room:** `GET /api/sentinel/status|decisions|alerts|proposals`
   (gateway-auth gated) plus the live `sentinel.decision` events on the bus
   stream — the UI polls/ subscribes, it never edits pinned JS. One-glance

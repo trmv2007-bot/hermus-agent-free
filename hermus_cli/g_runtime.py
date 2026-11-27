@@ -607,20 +607,21 @@ def _run_sentinel(args, ctx: CLIContext) -> None:
     if action == "install":
         import os
         import sys
+        from pathlib import Path
 
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        entry = f'"{sys.executable}" "{root}/hermus.py" sentinel run --model auto'
+        root = Path(__file__).resolve().parents[1]
+        entry = f'"{sys.executable}" "{root / "hermus.py"}" sentinel run --model auto'
         if os.name == "nt":
-            ps1 = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "hermus-sentinel-autostart.ps1")
-            with open(ps1, "w", encoding="utf-8") as f:
-                f.write(
-                    f'Start-Process -WindowStyle Hidden -FilePath {sys.executable!r} -ArgumentList @("{root}/hermus.py", "sentinel", "run", "--model", "auto")\n'
-                )
-            print(f"wrote {ps1}")
-            print("register with Task Scheduler (run once, elevated):")
-            print(
-                f'  schtasks /create /tn "HERMUS Sentinel" /sc onlogon /tr "powershell -WindowStyle Hidden -File {ps1}" /rl highest'
-            )
+            # Creates the launcher and the logon task, then proves the sentinel is
+            # actually running; an entry that does not come up is undone rather
+            # than left failing at every logon.
+            from core import autostart
+
+            result = autostart.install(autostart.SENTINEL, root=root, python=sys.executable)
+            for line in result.lines:
+                print(line)
+            if not result.ok:
+                raise SystemExit(1)
         elif os.path.exists("/run/systemd/system"):
             unit_dir = os.path.expanduser("~/.config/systemd/user")
             os.makedirs(unit_dir, exist_ok=True)
