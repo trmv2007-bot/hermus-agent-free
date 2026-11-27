@@ -1435,3 +1435,23 @@ host is probed in its own address family and an address this machine cannot offe
 refused in its own words rather than read as free, `status` finds a LAN-bound gateway
 and survives a listener that is not HTTP, and the listener count on the port never
 changes.
+
+## A room that is up because the machine says so, not because someone is watching
+
+The gateway is a foreground server: it serves until it dies, and it dies with the shell that
+started it. Started from a terminal, or from an agent session, closing that session darkens the
+room — which is why it had to be started by hand again and again, and why the logon task that was
+supposed to own it did nothing: its action pointed at a launcher the deleted install folder no
+longer held, so every logon ended in `Last Result 1`.
+
+- `hermus gateway service` — one resident process that owns the port, holds the gateway as its
+  child, and starts it again after it exits. It starts on loopback by default, leaves a gateway
+  that already answers alone, refuses to fight any other process holding the port, and backs off
+  to 30s only after repeated fast failures so a broken start cannot spin. Each start and exit is
+  one line in `logs/gateway-service.log`, so a room that went dark can say when and why.
+- A logon task whose action *is* the server can only be restarted when that action fails, which
+  depends on how the server happened to die. The keeper stays resident instead, so Windows'
+  restart-on-failure applies to the keeper and the keeper applies to the gateway.
+
+Measured on this machine: from nothing listening on `127.0.0.1:8000`, the task brought the room
+up in 20s; killing the gateway at 11:39:21 returned `/readyz 200` on a new pid at 11:39:36.
