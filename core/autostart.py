@@ -319,30 +319,31 @@ def rollback_script(entry: Entry, *, backup: Path | None = None) -> str:
 
 
 def rerun_command(entry: Entry, root: Path, python: Path) -> str:
-    """The command that installs *this* entry again, elevated.
+    """The command that installs *this* entry again, for an elevated PowerShell.
 
     ``hermus sentinel install`` owns the sentinel only, so pointing a gateway
     refusal at it would leave the room starting by hand at every logon while
-    reading as if autostart were complete. The room's entry is bootstrap's. Both
-    paths are quoted, because a profile with a space in it is a profile.
+    reading as if autostart were complete. The room's entry is bootstrap's. The
+    call operator and double-quoted paths are one PowerShell statement that works
+    with a space in the profile and without one; a bare quoted path is a parser
+    error there, which is the shell the Windows instructions use.
     """
     if entry is GATEWAY:
         target = f'"{Path(root) / "bootstrap.py"}"'
     else:
         target = f'"{Path(root) / "hermus.py"}" sentinel install'
-    return f'"{python}" {target}'
+    return f'& "{python}" {target}'
 
 
 def elevated_command(entry: Entry, launcher: Path) -> str:
-    """The one line to paste into an elevated shell when registration is refused."""
+    """The line that registers the task by hand, for an elevated PowerShell."""
     action = f'//B //Nologo "{launcher}"'
-    register = (
-        "Register-ScheduledTask -TaskName "
-        f"{_ps_quote(entry.task_name)} -Action (New-ScheduledTaskAction -Execute 'wscript.exe' "
-        f"-Argument {_ps_quote(action)}) -Trigger (New-ScheduledTaskTrigger -AtLogOn -User "
-        "$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)) -Force"
+    return (
+        f"Register-ScheduledTask -TaskName {_ps_quote(entry.task_name)} -Action "
+        f"(New-ScheduledTaskAction -Execute 'wscript.exe' -Argument {_ps_quote(action)}) "
+        f"-Trigger (New-ScheduledTaskTrigger -AtLogOn -User "
+        '"$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)) -Force"'
     )
-    return f'powershell -NoProfile -Command "{register}"'
 
 
 _POWERSHELL = ("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass")
@@ -601,8 +602,8 @@ def install(
                 f"task \\{entry.task_name}: NOT created - {reason}",
                 "  nothing was scheduled, so nothing fails at every logon; a task that was already there is unchanged",
                 f"  the launcher is in place at {path}",
-                f"  register it once in an elevated shell: {elevated_command(entry, path)}",
-                f"  or re-run the installer elevated: {rerun_command(entry, root, python)}",
+                f"  register it once in an elevated PowerShell: {elevated_command(entry, path)}",
+                f"  or re-run the installer in an elevated PowerShell: {rerun_command(entry, root, python)}",
             ]
             return result
 

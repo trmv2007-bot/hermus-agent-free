@@ -229,7 +229,7 @@ def test_a_refused_registration_says_what_was_not_done(profile, root):
     text = "\n".join(result.lines)
     assert not result.ok
     assert "NOT created - Access is denied" in text
-    assert "elevated" in text and 'powershell -NoProfile -Command "Register-ScheduledTask' in text
+    assert "elevated PowerShell" in text and "Register-ScheduledTask -TaskName 'Hermes_Gateway'" in text
     assert "installed" not in text.lower().replace("installed;", "")
     assert len(powershell.calls) == 2, "the register attempt, then a look at what is already there"
     assert "SilentlyContinue" in powershell.calls[1], "a refusal is followed by a look, not by an undo"
@@ -244,9 +244,9 @@ def test_the_rerun_command_quotes_paths_that_may_contain_spaces(profile, tmp_pat
     python = spaced / ".venv" / "Scripts" / "python.exe"
     room = autostart.rerun_command(autostart.GATEWAY, spaced, python)
     sentinel = autostart.rerun_command(autostart.SENTINEL, spaced, python)
-    assert room == f'"{python}" "{spaced / "bootstrap.py"}"'
-    assert sentinel == f'"{python}" "{spaced / "hermus.py"}" sentinel install'
-    assert str(spaced) in room and ' "' in room
+    assert room == f'& "{python}" "{spaced / "bootstrap.py"}"'
+    assert sentinel == f'& "{python}" "{spaced / "hermus.py"}" sentinel install'
+    assert room.startswith('& "'), "the call operator is what makes a quoted path a command in PowerShell"
 
 
 def test_a_sentinel_refusal_names_the_sentinel_installer(profile, root):
@@ -365,9 +365,10 @@ def test_sentinel_that_never_starts_is_reported_and_undone(profile, root):
 def test_elevated_command_is_one_pasteable_line(profile):
     command = autostart.elevated_command(autostart.GATEWAY, autostart.launcher_path(autostart.GATEWAY))
     assert "\n" not in command
-    assert command.startswith('powershell -NoProfile -Command "Register-ScheduledTask')
-    assert "-TaskName 'Hermes_Gateway'" in command
-    assert "-AtLogOn" in command
+    assert command.startswith("Register-ScheduledTask -TaskName 'Hermes_Gateway'")
+    assert "-AtLogOn -User" in command
+    assert "Argument '//B //Nologo \"" in command, "the launcher path is quoted inside a single-quoted argument"
+    assert "powershell -NoProfile" not in command, "a native statement, so no nested quoting is needed"
 
 
 class _Room(BaseHTTPRequestHandler):
