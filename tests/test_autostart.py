@@ -14,6 +14,7 @@ import base64
 import json
 import re
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -491,6 +492,12 @@ def test_install_serves_and_probes_the_port_it_is_given(profile, root):
     assert result.ok
     assert probed == [9123], "the probe must ask the port the launcher will serve"
     assert "--port 9123" in autostart.launcher_path(autostart.GATEWAY).read_text(encoding="ascii")
+
+
+def test_the_stop_guard_falls_back_to_this_process_alone(profile, monkeypatch):
+    monkeypatch.setitem(sys.modules, "psutil", None)
+    monkeypatch.setattr(autostart.os, "getpid", lambda: 1234)
+    assert autostart._family() == {1234}, "without psutil the guard knows itself and stops nothing else"
 
 
 def test_install_all_owns_the_room_and_the_sentinel(profile, root):

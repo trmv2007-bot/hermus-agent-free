@@ -114,7 +114,9 @@ def default_port() -> int:
         from core.config import config
 
         return int(config.gateway_port)
-    except Exception:  # noqa: BLE001 - a probe must not fail over its own port number
+    except (ImportError, AttributeError, TypeError, ValueError):
+        # Configuration that cannot be imported or parsed is not a reason to
+        # refuse to install; the environment's own answer is next.
         try:
             return int(os.environ.get("HERMUS_GATEWAY_PORT") or DEFAULT_PORT)
         except ValueError:
@@ -451,15 +453,18 @@ def _family() -> set[int]:
     from a heredoc ended the bash wrapper that was running it. A process must
     never end itself or the chain that is waiting on it.
     """
+    family = {os.getpid()}
     try:
         import psutil
-
-        family = {os.getpid()}
-        for parent in psutil.Process().parents():
-            family.add(parent.pid)
+    except ImportError:
         return family
-    except Exception:  # noqa: BLE001 - a stop must not fail over its own guard
-        return {os.getpid()}
+    try:
+        family.update(parent.pid for parent in psutil.Process().parents())
+    except (psutil.Error, OSError):
+        # A parent this account may not inspect still leaves this process known,
+        # which is the answer that stops nothing: never guess at the tree.
+        pass
+    return family
 
 
 def find_processes(needle: str) -> list[int]:
