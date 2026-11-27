@@ -55,7 +55,7 @@ hermus sentinel run --once               # replay the last 100 events once and e
 hermus sentinel run --dry-run            # decide + record, never enqueue/notify
 hermus sentinel test '{"type":"incident","command":"circuit_open","status":"failed","args":{"severity":"critical"}}'
 hermus sentinel status                   # thresholds, bus cursor, recent decisions
-hermus sentinel install                  # autostart: systemd user unit / Termux boot / cron @reboot / Windows schtasks
+hermus sentinel install                  # create the autostart entry and prove it runs (systemd / Termux / cron / logon task)
 hermus sentinel alerts                   # tail data/sentinel/alerts.jsonl (local push-alert log)
 hermus sentinel consolidate --deep       # one-shot learning pass (deep = recurring failures -> LessonsStore)
 hermus sentinel nightshift               # cron: every day at 3:00 am -> hermus sentinel consolidate --deep

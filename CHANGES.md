@@ -1455,3 +1455,46 @@ longer held, so every logon ended in `Last Result 1`.
 
 Measured on this machine: from nothing listening on `127.0.0.1:8000`, the task brought the room
 up in 20s; killing the gateway at 11:39:21 returned `/readyz 200` on a new pid at 11:39:36.
+
+## The room comes up by itself after a fresh install
+
+`bootstrap.py` and `hermus sentinel install` both printed a task command and called it
+installed, so a new Windows machine got a companion that died with the terminal it was
+started from — and the one task that existed on this PC pointed at a launcher the install
+folder no longer held, so every logon ended in `Last Result 1` and the room stayed dark.
+
+`core/autostart.py` now performs that step, and is the only implementation of it:
+
+- **Launcher.** One `.vbs` per entry at a stable path inside the user profile
+  (`%LOCALAPPDATA%\hermes\gateway-service\`). It starts the entry through the interpreter
+  that owns Hermes's packages, with no window, and *waits*, so the task stays `Running` for
+  the life of the process and exits with its code — which is what makes Task Scheduler's
+  restart-on-failure apply to the keeper rather than only to the launcher. A re-installed or
+  moved checkout is re-pointed by rewriting this file, never by editing a task.
+- **Logon task.** Registered through PowerShell's `ScheduledTasks` module with an explicit
+  per-user trigger. `schtasks /create /sc onlogon` is refused to a non-elevated account
+  ("Access is denied", measured here); a logon trigger with *no* user means every user and is
+  refused the same way. `Register-ScheduledTask -AtLogOn -User <me>` is neither, and lands a
+  task with `LogonType Interactive`, `RunLevel Limited`. `-Force` makes a second run replace
+  the same entry instead of adding one.
+- **Probe, then undo.** The task is started once and the install waits for `/readyz` on
+  loopback, printing the pid that answers (the sentinel is proved by its command line
+  instead). If it does not come up, the previous task definition is restored from the XML
+  exported before registration — or the task is removed if there was none — the launcher is
+  restored or deleted, and the process it started is stopped. Nothing is left half-installed,
+  because a task that fails at every logon is worse than no task.
+
+`bootstrap.py` installs both entries after a clean, verified install (`HERMUS_SKIP_AUTOSTART=1`
+skips it, verify-only never touches the machine) and prints what it created; `hermus sentinel
+install` installs the sentinel entry the same way and exits non-zero when it could not prove it.
+The Windows branch previously resolved the checkout with one `dirname` too many, so its launcher
+and Task Scheduler command named a `hermus.py` that does not exist; all platforms now resolve the
+repository root from the module's own path.
+
+**Verification.** `tests/test_autostart.py` (16 tests) holds the launcher's path and content, the
+task command line, that registration asks for no elevation, that a second install leaves one
+entry, that a refused registration is reported as a refusal with a pasteable command, and that a
+probe which never answers reports failure and undoes the entry — with PowerShell replaced by a
+runner that decodes the script and no test ever calling `schtasks`. Measured on this PC: a real
+per-user logon task was registered, started and undone without elevation, and a real launcher
+started the room with its own exit code.
