@@ -323,11 +323,14 @@ def rerun_command(entry: Entry, root: Path, python: Path) -> str:
 
     ``hermus sentinel install`` owns the sentinel only, so pointing a gateway
     refusal at it would leave the room starting by hand at every logon while
-    reading as if autostart were complete. The room's entry is bootstrap's.
+    reading as if autostart were complete. The room's entry is bootstrap's. Both
+    paths are quoted, because a profile with a space in it is a profile.
     """
     if entry is GATEWAY:
-        return f"{python} {Path(root) / 'bootstrap.py'}"
-    return f"{python} {Path(root) / 'hermus.py'} sentinel install"
+        target = f'"{Path(root) / "bootstrap.py"}"'
+    else:
+        target = f'"{Path(root) / "hermus.py"}" sentinel install'
+    return f'"{python}" {target}'
 
 
 def elevated_command(entry: Entry, launcher: Path) -> str:

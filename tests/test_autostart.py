@@ -239,6 +239,16 @@ def test_a_refused_registration_says_what_was_not_done(profile, root):
     assert "sentinel install" not in text, "a gateway refusal must not send the person to the sentinel installer"
 
 
+def test_the_rerun_command_quotes_paths_that_may_contain_spaces(profile, tmp_path):
+    spaced = tmp_path / "J Smith" / "hermus-agent-free"
+    python = spaced / ".venv" / "Scripts" / "python.exe"
+    room = autostart.rerun_command(autostart.GATEWAY, spaced, python)
+    sentinel = autostart.rerun_command(autostart.SENTINEL, spaced, python)
+    assert room == f'"{python}" "{spaced / "bootstrap.py"}"'
+    assert sentinel == f'"{python}" "{spaced / "hermus.py"}" sentinel install'
+    assert str(spaced) in room and ' "' in room
+
+
 def test_a_sentinel_refusal_names_the_sentinel_installer(profile, root):
     result = autostart.install(
         autostart.SENTINEL,
@@ -251,7 +261,7 @@ def test_a_sentinel_refusal_names_the_sentinel_installer(profile, root):
     )
     text = "\n".join(result.lines)
     assert not result.ok
-    assert "hermus.py sentinel install" in text
+    assert '" sentinel install' in text and "bootstrap.py" not in text
     assert "room:" not in text, "a refused entry was never started, so it cannot claim to serve"
 
 
