@@ -235,6 +235,23 @@ def test_a_refused_registration_says_what_was_not_done(profile, root):
     assert "SilentlyContinue" in powershell.calls[1], "a refusal is followed by a look, not by an undo"
     assert autostart.launcher_path(autostart.GATEWAY).is_file(), "the command it prints must point at a file that exists"
     assert "the launcher is in place" in text
+    assert "bootstrap.py" in text, "the fallback that installs the room is bootstrap, not sentinel install"
+    assert "sentinel install" not in text, "a gateway refusal must not send the person to the sentinel installer"
+
+
+def test_a_sentinel_refusal_names_the_sentinel_installer(profile, root):
+    result = autostart.install(
+        autostart.SENTINEL,
+        root=root,
+        python=root / "python.exe",
+        platform="nt",
+        run=FakePowerShell(lambda script: (3, "HERMUS_TASK error=Access is denied.\n", "")),
+        find=lambda needle: [],
+        stop=lambda needle, exclude=(): [],
+    )
+    text = "\n".join(result.lines)
+    assert not result.ok
+    assert "hermus.py sentinel install" in text
     assert "room:" not in text, "a refused entry was never started, so it cannot claim to serve"
 
 

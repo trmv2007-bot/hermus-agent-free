@@ -318,6 +318,18 @@ def rollback_script(entry: Entry, *, backup: Path | None = None) -> str:
     )
 
 
+def rerun_command(entry: Entry, root: Path, python: Path) -> str:
+    """The command that installs *this* entry again, elevated.
+
+    ``hermus sentinel install`` owns the sentinel only, so pointing a gateway
+    refusal at it would leave the room starting by hand at every logon while
+    reading as if autostart were complete. The room's entry is bootstrap's.
+    """
+    if entry is GATEWAY:
+        return f"{python} {Path(root) / 'bootstrap.py'}"
+    return f"{python} {Path(root) / 'hermus.py'} sentinel install"
+
+
 def elevated_command(entry: Entry, launcher: Path) -> str:
     """The one line to paste into an elevated shell when registration is refused."""
     action = f'//B //Nologo "{launcher}"'
@@ -587,7 +599,7 @@ def install(
                 "  nothing was scheduled, so nothing fails at every logon; a task that was already there is unchanged",
                 f"  the launcher is in place at {path}",
                 f"  register it once in an elevated shell: {elevated_command(entry, path)}",
-                f"  or re-run the installer elevated: {python} {root / 'hermus.py'} sentinel install",
+                f"  or re-run the installer elevated: {rerun_command(entry, root, python)}",
             ]
             return result
 
