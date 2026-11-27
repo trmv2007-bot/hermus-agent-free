@@ -81,9 +81,13 @@ class FreeLLM:
         # Allow override of provider/model
         if provider:
             self.provider = provider.lower()
-            self.model_name = (
-                model.split("/", 1)[-1] if model and "/" in model else (model or get_provider(provider).get("default_model"))
-            )
+            name = model or get_provider(provider).get("default_model")
+            # Only drop a leading segment that *is* this provider. Ollama serves
+            # namespaced tags (``SparkLLM/Spark-X2.6-4B:q4_k_m``), and stripping
+            # the namespace turned an installed model into a 404 on every call.
+            if model and "/" in model and model.split("/", 1)[0].lower() == self.provider:
+                name = model.split("/", 1)[1]
+            self.model_name = name
         else:
             self.provider, self.model_name = parse_model_ref(self.model)
         self.api_key_override = api_key

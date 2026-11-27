@@ -817,7 +817,7 @@ def test_queued_turn_is_pollable_end_to_end(client):
     assert client.get("/jobs/job_nope").status_code == 404
 
 
-def test_queued_mission_reports_failure_not_advice(client):
+def test_queued_mission_reports_failure_not_advice(client, no_model_backend):
     """A mission on a backend that cannot do the work is reported, not faked."""
     r = client.post(
         "/command",

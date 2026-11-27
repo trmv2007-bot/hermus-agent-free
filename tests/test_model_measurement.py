@@ -621,6 +621,10 @@ def test_the_incumbent_passed_into_resolution_is_the_one_the_margin_protects(tmp
     measurement.record(incumbent, path=path)
     measurement.record(challenger, path=path)
     monkeypatch.setenv("HERMUS_DATA_DIR", str(tmp_path))
+    # Another module pins the process model for the whole run; a forced model
+    # outranks the measured default by design, so the test states that no pin is
+    # in force for the choice it is measuring.
+    monkeypatch.delenv("HERMUS_MODEL", raising=False)
     monkeypatch.setattr(measurement, "model_digest", lambda ref, **_: "digest-a")
     assert measurement.choose(["ollama/lfm2.5:8b", "ollama/qwen3.5:2b"], incumbent="ollama/lfm2.5:8b").ref == "ollama/lfm2.5:8b"
     status = {

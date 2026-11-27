@@ -25,6 +25,20 @@ from .tool_select import EXPAND_TOOL_NAME, select_tools, selection_report
 logger = get_logger(__name__)
 
 
+def _ollama_serves(tags: set[str], wanted: str) -> bool:
+    """Whether an ``/api/tags`` listing carries the model a turn asked for.
+
+    Ollama resolves a bare name to ``:latest``, so ``llama3.1`` matches
+    ``llama3.1:latest``; everything else must match exactly, namespace included.
+    """
+    name = wanted.strip().lower()
+    if not name:
+        return False
+    if ":" not in name.rsplit("/", 1)[-1]:
+        name = f"{name}:latest"
+    return name in tags
+
+
 class HermusAgent:
     """Free Hermes-like agent - self-improving with memory, skills, multi-step tools."""
 
@@ -214,7 +228,23 @@ class HermusAgent:
 
                 base = str(getattr(config, "ollama_base_url", "http://localhost:11434")).rstrip("/")
                 r = requests.get(f"{base}/api/tags", timeout=2)
-                return r.status_code == 200
+                if r.status_code != 200:
+                    return False
+                # A server that answers is not a model that can. Asking for a
+                # model that was never pulled costs a mission (or a council) a
+                # 404 on every rung of its fallback ladder, so it is the same
+                # honest dead end as Ollama not running at all.
+                wanted = str(getattr(getattr(self, "llm", None), "model_name", "") or "")
+                if not wanted:
+                    return True
+                names = {str(m.get("name") or m.get("model") or "").lower() for m in (r.json().get("models") or [])}
+                if _ollama_serves(names, wanted):
+                    return True
+                self._backend_detail = (
+                    f"Ollama is running at {base} but has no model '{wanted}' — "
+                    f"pull it (ollama pull {wanted}) or choose another in Settings"
+                )
+                return False
             except Exception:
                 return False
         # Hosted/custom providers: treat as available only when a key is present.

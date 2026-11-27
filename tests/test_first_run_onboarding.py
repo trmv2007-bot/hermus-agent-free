@@ -402,11 +402,15 @@ def test_the_welcome_screen_announces_the_download_before_it_starts():
 def test_name_and_permissions_are_written_and_restored():
     _reset_state()
     c = _client()
+    # The POST applies a policy to the shared permission store, so it runs
+    # inside `_clean_policy` — otherwise "watch" stays in force for every later
+    # test in the same run and their permission assertions read a deny.
+    with _clean_policy():
+        assert c.post("/api/v1/onboarding/permissions", json={"profile": "watch"}).json()["profile"] == "watch"
+        assert c.post("/api/v1/onboarding/permissions", json={"profile": "nonsense"}).status_code == 400
+        assert onboarding.current_profile() == "watch"
     assert c.post("/api/v1/onboarding/name", json={"name": "Ada"}).json()["name"] == "Ada"
-    assert c.post("/api/v1/onboarding/permissions", json={"profile": "watch"}).json()["profile"] == "watch"
-    assert c.post("/api/v1/onboarding/permissions", json={"profile": "nonsense"}).status_code == 400
     assert onboarding.load()["name"] == "Ada"
-    assert onboarding.current_profile() == "watch"
 
 
 @contextlib.contextmanager
