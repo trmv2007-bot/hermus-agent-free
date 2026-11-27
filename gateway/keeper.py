@@ -65,20 +65,26 @@ def serve(
 
     ``stop`` ends the loop between gateway runs; ``log`` keeps a line per start
     and exit so a room that went dark can say when and why; ``spawn`` is
-    ``subprocess.call`` unless a caller supplies its own.
+    ``subprocess.Popen`` unless a caller supplies its own.
     """
     stop = stop or threading.Event()
-    spawn = spawn or subprocess.call
+    spawn = spawn or subprocess.Popen
+
+    # A console that cannot encode a path or an exit code must degrade, not raise:
+    # supervision that dies to its own output is not supervision. The log file is
+    # UTF-8 and says what the console could not.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
     def say(message: str) -> None:
-        """One line per event, in text any Windows console codepage can print.
-
-        A keeper killed by its own log line is not keeping the room up, and a
-        console that cannot encode a character raises instead of degrading, so
-        these messages stay ASCII.
-        """
+        """One line per event, to the console where it is welcome and to the log."""
         line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}"
-        print(line, flush=True)
+        try:
+            print(line, flush=True)
+        except (OSError, UnicodeEncodeError, ValueError):
+            pass
         if log is not None:
             try:
                 log.parent.mkdir(parents=True, exist_ok=True)
@@ -102,9 +108,12 @@ def serve(
             continue
         started = time.time()
         try:
-            code: object = spawn(gateway_command(port, host))
+            child = spawn(gateway_command(port, host))
         except OSError as exc:
-            code = f"could not start: {exc}"
+            child, code = None, f"could not start: {exc}"
+        if child is not None:
+            say(f"keeper: gateway started (pid {getattr(child, 'pid', 'unknown')})")
+            code = child.wait()
         lived = time.time() - started
         if stop.is_set():
             break

@@ -42,6 +42,19 @@ class Stopper:
         return self._stopped
 
 
+class Child:
+    """A spawned gateway: the pid the log names, and the code it exits with."""
+
+    def __init__(self, code: int = 0, pid: int = 4242):
+        self.code = code
+        self.pid = pid
+        self.reaped = False
+
+    def wait(self) -> int:
+        self.reaped = True
+        return self.code
+
+
 @pytest.fixture()
 def no_gateway(monkeypatch):
     """Nothing answers on the port and nothing holds it."""
@@ -62,7 +75,7 @@ def test_a_gateway_already_serving_the_port_is_left_alone(monkeypatch):
     started: list[list[str]] = []
     stop = Stopper(after=2)
 
-    keeper.serve(8000, spawn=lambda argv: started.append(argv), stop=stop)
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=stop)
 
     assert started == []
 
@@ -74,7 +87,7 @@ def test_a_port_another_process_holds_is_not_taken(monkeypatch, capsys):
     started: list[list[str]] = []
     stop = Stopper(after=2)
 
-    keeper.serve(8000, spawn=lambda argv: started.append(argv), stop=stop)
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=stop)
 
     assert started == []
     assert "held by another process" in capsys.readouterr().out
@@ -85,7 +98,7 @@ def test_the_gateway_runs_on_loopback_from_this_installs_own_interpreter(no_gate
     started: list[list[str]] = []
     stop = Stopper(after=0)
 
-    keeper.serve(8000, spawn=lambda argv: started.append(argv) or 0, stop=stop)
+    keeper.serve(8000, spawn=lambda argv: started.append(argv) or Child(), stop=stop)
 
     assert len(started) == 1
     argv = started[0]
@@ -98,7 +111,7 @@ def test_a_gateway_that_keeps_dying_backs_off_instead_of_spinning(no_gateway):
     """A broken start retries within the minute, then less often, never in a hot loop."""
     stop = Stopper(after=4)
 
-    keeper.serve(8000, spawn=lambda argv: 1, stop=stop)
+    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=stop)
 
     delays = [w for w in stop.waits if w >= keeper.RESTART_SECONDS]
     assert delays[:4] == [3.0, 6.0, 12.0, 24.0]
@@ -110,17 +123,51 @@ def test_a_gateway_that_served_a_healthy_run_is_restarted_promptly(monkeypatch, 
     monkeypatch.setattr(keeper, "HEALTHY_RUN_SECONDS", 0.0)
     stop = Stopper(after=2)
 
-    keeper.serve(8000, spawn=lambda argv: 1, stop=stop)
+    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=stop)
 
     assert [w for w in stop.waits if w >= keeper.RESTART_SECONDS] == [keeper.RESTART_SECONDS] * 3
 
 
 def test_the_keeper_prints_only_what_a_console_can_encode(no_gateway, capsys):
     """The keeper's log line must not be the thing that kills it on a codepage."""
-    keeper.serve(8000, spawn=lambda argv: 1, stop=Stopper(after=1))
+    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=Stopper(after=1))
     printed = capsys.readouterr().out
     assert printed
     printed.encode("ascii")
+
+
+def test_each_launch_is_recorded_before_the_keeper_waits_for_it(no_gateway, tmp_path):
+    """A child that hangs in boot must still leave its launch in the log."""
+    log = tmp_path / "gateway-service.log"
+
+    keeper.serve(8000, spawn=lambda argv: Child(code=1, pid=9931), stop=Stopper(after=0), log=log)
+
+    text = log.read_text(encoding="utf-8")
+    assert "gateway started (pid 9931)" in text
+    assert "gateway exited (1)" in text
+
+
+def test_a_console_that_cannot_print_does_not_end_supervision(no_gateway, tmp_path, monkeypatch):
+    """A codepage that refuses the line is not a reason to stop keeping the room up."""
+
+    class Refusing:
+        def write(self, text):
+            raise UnicodeEncodeError("cp1252", text, 0, 1, "not representable")
+
+        def flush(self):
+            raise UnicodeEncodeError("cp1252", "", 0, 0, "not representable")
+
+        def reconfigure(self, **kwargs):
+            raise ValueError("this stream cannot be reconfigured")
+
+    log = tmp_path / "gateway-service.log"
+    monkeypatch.setattr(keeper.sys, "stdout", Refusing())
+
+    keeper.serve(8000, spawn=lambda argv: Child(code=1), stop=Stopper(after=1), log=log)
+
+    text = log.read_text(encoding="utf-8")
+    assert "gateway started" in text
+    assert "gateway exited (1)" in text
 
 
 def test_the_cli_exposes_the_service_action():
