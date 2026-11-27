@@ -369,6 +369,7 @@ def test_elevated_command_is_one_pasteable_line(profile):
     assert "-AtLogOn -User" in command
     assert "Argument '//B //Nologo \"" in command, "the launcher path is quoted inside a single-quoted argument"
     assert "powershell -NoProfile" not in command, "a native statement, so no nested quoting is needed"
+    assert command.endswith(") -Force"), "the switch has to sit outside the trigger expression, not inside a string"
 
 
 class _Room(BaseHTTPRequestHandler):

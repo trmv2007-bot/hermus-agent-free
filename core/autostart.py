@@ -338,11 +338,11 @@ def rerun_command(entry: Entry, root: Path, python: Path) -> str:
 def elevated_command(entry: Entry, launcher: Path) -> str:
     """The line that registers the task by hand, for an elevated PowerShell."""
     action = f'//B //Nologo "{launcher}"'
+    current_user = "$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
     return (
         f"Register-ScheduledTask -TaskName {_ps_quote(entry.task_name)} -Action "
         f"(New-ScheduledTaskAction -Execute 'wscript.exe' -Argument {_ps_quote(action)}) "
-        f"-Trigger (New-ScheduledTaskTrigger -AtLogOn -User "
-        '"$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)) -Force"'
+        f"-Trigger (New-ScheduledTaskTrigger -AtLogOn -User {current_user}) -Force"
     )
 
 
