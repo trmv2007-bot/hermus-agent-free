@@ -115,6 +115,14 @@ def test_a_gateway_that_served_a_healthy_run_is_restarted_promptly(monkeypatch, 
     assert [w for w in stop.waits if w >= keeper.RESTART_SECONDS] == [keeper.RESTART_SECONDS] * 3
 
 
+def test_the_keeper_prints_only_what_a_console_can_encode(no_gateway, capsys):
+    """The keeper's log line must not be the thing that kills it on a codepage."""
+    keeper.serve(8000, spawn=lambda argv: 1, stop=Stopper(after=1))
+    printed = capsys.readouterr().out
+    assert printed
+    printed.encode("ascii")
+
+
 def test_the_cli_exposes_the_service_action():
     """`hermus gateway service` is the action the logon task names, so it must parse."""
     from hermus_cli import build_parser

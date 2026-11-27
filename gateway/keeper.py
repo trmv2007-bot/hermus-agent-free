@@ -71,6 +71,12 @@ def serve(
     spawn = spawn or subprocess.call
 
     def say(message: str) -> None:
+        """One line per event, in text any Windows console codepage can print.
+
+        A keeper killed by its own log line is not keeping the room up, and a
+        console that cannot encode a character raises instead of degrading, so
+        these messages stay ASCII.
+        """
         line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}"
         print(line, flush=True)
         if log is not None:
@@ -81,7 +87,7 @@ def serve(
             except OSError:
                 pass
 
-    say(f"keeper: watching {host}:{port} — the gateway runs as {sys.executable}")
+    say(f"keeper: watching {host}:{port} - the gateway runs as {sys.executable}")
     wait = restart_seconds
     while not stop.is_set():
         if ports.live_gateway(port) is not None:
