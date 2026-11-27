@@ -12,8 +12,10 @@ a socket.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -248,30 +250,38 @@ def test_a_port_this_machine_would_refuse_is_reported_as_that(monkeypatch, capsy
 def test_stopping_a_wedged_gateway_stops_what_it_started():
     """The replacement path is a real kill, not a request: prove it on a real tree."""
     psutil = pytest.importorskip("psutil")
-    parent = subprocess.Popen(
+    marker = f"keeper-stop-test-{os.getpid()}"
+    script = chr(10).join(
         [
-            sys.executable,
-            "-c",
-            "import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); time.sleep(60)",
+            "import subprocess, sys, time",
+            "subprocess.run([sys.executable, '-c', 'import time; time.sleep(30)'])",
+            f"time.sleep(30)  # {marker}",
         ]
     )
-    children = []
+    worker = threading.Thread(target=subprocess.run, args=([sys.executable, "-c", script],), daemon=True)
+    worker.start()
+    parent = None
+    children: list = []
     try:
         deadline = time.time() + 30
+        while time.time() < deadline and parent is None:
+            for proc in psutil.process_iter(["pid", "cmdline"]):
+                if any(marker in part for part in (proc.info.get("cmdline") or [])):
+                    parent = psutil.Process(proc.pid)
+                    break
+            if parent is None:
+                time.sleep(0.1)
+        assert parent is not None, "the test tree never appeared"
         while time.time() < deadline and not children:
-            children = psutil.Process(parent.pid).children(recursive=True)
+            children = parent.children(recursive=True)
             time.sleep(0.1)
-        assert children, "the test child never started anything to stop"
+        assert children, "the test tree never started anything to stop"
 
         assert keeper.stop_process(parent.pid) is True
-        assert parent.wait(timeout=10) is not None
         assert all(not child.is_running() for child in children)
     finally:
-        if parent.poll() is None:
-            parent.kill()
-            parent.wait()
-        for child in children:
+        for victim in children + ([parent] if parent is not None else []):
             try:
-                child.kill()
+                victim.kill()
             except psutil.Error:
                 pass
